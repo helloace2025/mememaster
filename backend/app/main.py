@@ -13,6 +13,7 @@ from app.config import get_settings
 from app.services.analyze import analyze_token
 from app.services.chat import (
     analyze_twitter_ops,
+    fetch_twitter_only,
     freeform_chat,
     generate_playbook,
     _twitter_fetch_failed_message,
@@ -136,12 +137,21 @@ class TwitterOpsBody(BaseModel):
     username: str | None = None
     token: dict[str, Any] | None = None
     question: str = "分析这个账号的推文，看它是怎么运营的"
-    max_tweets: int = 25
+    max_tweets: int = 12
     lang: str | None = None
+    # If false: return tweet timeline only (fast, no LLM)
+    analyze: bool = True
     provider: str | None = None
     model: str | None = None
     api_key: str | None = None
     base_url: str | None = None
+
+
+class TwitterFetchBody(BaseModel):
+    username: str | None = None
+    token: dict[str, Any] | None = None
+    max_tweets: int = 12
+    lang: str | None = None
 
 
 class PlaybookBody(BaseModel):
@@ -558,66 +568,133 @@ async def chat_endpoint(body: ChatBody) -> dict[str, Any]:
     return {**result, "disclaimer": lang_disclaimer(normalize_lang(body.lang))}
 
 
-@app.post("/api/twitter/ops")
-async def twitter_ops_endpoint(body: TwitterOpsBody) -> dict[str, Any]:
-    """Fetch tweets via 6551 OpenNews REST (same as opentwitter skill) + ops analysis."""
+def _resolve_twitter_username(
+    username: str | None, token: dict[str, Any] | None
+) -> tuple[str, str | None]:
+    """Return (cleaned_username, error_status). error_status set if unusable."""
     from app.services.gmgn import clean_twitter_username
 
-    L = normalize_lang(body.lang)
-    disc = lang_disclaimer(L)
-    username = (body.username or "").strip()
-    # Prefer explicit username, then token fields (may be full x.com URL from GMGN)
-    if not username and body.token:
+    u = (username or "").strip()
+    if not u and token:
         for key in ("twitter_username", "twitter", "twitter_raw"):
-            raw = body.token.get(key)
+            raw = token.get(key)
             if raw:
                 cleaned, st = clean_twitter_username(raw)
                 if cleaned and st == "ok":
-                    username = cleaned
-                    break
-        if not username:
-            site = str(body.token.get("website") or "")
-            cleaned, st = clean_twitter_username(site)
-            if cleaned and st == "ok":
-                username = cleaned
-
-    if username:
-        cleaned, st = clean_twitter_username(username)
+                    return cleaned, None
+        site = str(token.get("website") or "")
+        cleaned, st = clean_twitter_username(site)
+        if cleaned and st == "ok":
+            return cleaned, None
+    if u:
+        cleaned, st = clean_twitter_username(u)
         if st in ("dead", "community", "missing") or not cleaned:
-            if L == "en":
-                msg = (
-                    f"Invalid X link or Community/deleted account (status={st}); cannot fetch tweets. "
-                    "Pick a token with a real @handle."
-                )
-            else:
-                msg = (
-                    f"X 链接无效或为 Community/已删除账号（status={st}），无法抓推文。"
-                    " 请换有真实 @handle 的代币。"
-                )
-            return {
-                "ok": False,
-                "username": username,
-                "content": msg,
-                "source": "twitter_bad_handle",
-                "error_code": st or "bad_handle",
-                "disclaimer": disc,
-            }
-        username = cleaned
+            return u, st or "bad_handle"
+        return cleaned, None
+    return "", "missing"
 
-    if not username:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "twitter username required"
+
+@app.post("/api/twitter/fetch")
+async def twitter_fetch_endpoint(body: TwitterFetchBody) -> dict[str, Any]:
+    """Fast path: 6551 tweets only — no LLM. Always finishes quickly."""
+    L = normalize_lang(body.lang)
+    disc = lang_disclaimer(L)
+    username, bad = _resolve_twitter_username(body.username, body.token)
+    if bad or not username:
+        return {
+            "ok": False,
+            "username": username or "",
+            "tweet_count": 0,
+            "tweets": [],
+            "content": (
+                "No valid X handle."
                 if L == "en"
-                else "需要 twitter username：请传 username，或 token.twitter_username"
+                else "无有效 X 账号。"
             ),
+            "source": "twitter_bad_handle",
+            "disclaimer": disc,
+        }
+    if not settings.opennews_token:
+        return {
+            "ok": False,
+            "username": username,
+            "tweet_count": 0,
+            "tweets": [],
+            "content": "OPENNEWS_TOKEN is not set",
+            "source": "twitter_error",
+            "disclaimer": disc,
+        }
+    try:
+        result = await fetch_twitter_only(
+            settings,
+            username=username,
+            max_tweets=min(15, max(5, body.max_tweets or 12)),
+            lang=L,
         )
+    except Exception as e:
+        return {
+            "ok": False,
+            "username": username,
+            "tweet_count": 0,
+            "tweets": [],
+            "content": _twitter_fetch_failed_message(username, lang=L),
+            "source": "twitter_error",
+            "error_code": "server_error",
+            "disclaimer": disc,
+        }
+    return {**result, "disclaimer": disc}
+
+
+@app.post("/api/twitter/ops")
+async def twitter_ops_endpoint(body: TwitterOpsBody) -> dict[str, Any]:
+    """Fetch tweets via 6551 OpenNews REST + optional LLM ops analysis."""
+    L = normalize_lang(body.lang)
+    disc = lang_disclaimer(L)
+    username, bad = _resolve_twitter_username(body.username, body.token)
+    if bad or not username:
+        if L == "en":
+            msg = (
+                f"Invalid X link or Community/deleted account (status={bad}); cannot fetch tweets. "
+                "Pick a token with a real @handle."
+            )
+        else:
+            msg = (
+                f"X 链接无效或为 Community/已删除账号（status={bad}），无法抓推文。"
+                " 请换有真实 @handle 的代币。"
+            )
+        return {
+            "ok": False,
+            "username": username or "",
+            "content": msg,
+            "source": "twitter_bad_handle",
+            "error_code": bad or "bad_handle",
+            "disclaimer": disc,
+        }
+
     if not settings.opennews_token:
         raise HTTPException(
             status_code=400,
             detail="OPENNEWS_TOKEN is not set",
         )
+
+    # Fast path: timeline only (UI calls this first)
+    if not body.analyze:
+        try:
+            result = await fetch_twitter_only(
+                settings,
+                username=username,
+                max_tweets=min(15, max(5, body.max_tweets or 12)),
+                lang=L,
+            )
+        except Exception:
+            return {
+                "ok": False,
+                "username": username,
+                "content": _twitter_fetch_failed_message(username, lang=L),
+                "source": "twitter_error",
+                "disclaimer": disc,
+            }
+        return {**result, "disclaimer": disc}
 
     try:
         result = await analyze_twitter_ops(
@@ -625,11 +702,12 @@ async def twitter_ops_endpoint(body: TwitterOpsBody) -> dict[str, Any]:
             username=username,
             token=body.token,
             question=body.question,
-            provider=body.provider,
-            model=body.model,
-            api_key=body.api_key,
-            base_url=body.base_url,
-            max_tweets=min(20, max(5, body.max_tweets or 20)),
+            # Prefer server-side LLM keys — client overrides often break under load
+            provider=body.provider if body.api_key else None,
+            model=body.model if body.api_key else None,
+            api_key=body.api_key or None,
+            base_url=body.base_url if body.api_key else None,
+            max_tweets=min(12, max(5, body.max_tweets or 12)),
             lang=L,
         )
     except TwitterError as e:

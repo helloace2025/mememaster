@@ -326,16 +326,51 @@ async def analyze_website(
             "请基于以下真实抓取的官网数据做落地页运营拆解：\n"
             + json.dumps(payload, ensure_ascii=False, default=str)[:18000]
         )
-    content, resolved = await chat_text(
-        settings,
-        website_system(L),
-        prompt,
-        provider=provider,
-        model=model,
-        api_key=api_key,
-        base_url=base_url,
-        temperature=0.35,
-    )
+    import asyncio
+
+    try:
+        content, resolved = await asyncio.wait_for(
+            chat_text(
+                settings,
+                website_system(L),
+                prompt,
+                provider=provider,
+                model=model,
+                api_key=api_key,
+                base_url=base_url,
+                temperature=0.35,
+            ),
+            timeout=22.0,
+        )
+    except Exception:
+        # Still return page facts if LLM dies / times out
+        tech = ", ".join(fetched.get("tech_hints") or []) or ("—" if L == "en" else "—")
+        if L == "en":
+            content = (
+                f"## Site snapshot (AI teardown timed out)\n\n"
+                f"- URL: {fetched.get('final_url')}\n"
+                f"- Title: {fetched.get('title') or '—'}\n"
+                f"- Description: {fetched.get('description') or '—'}\n"
+                f"- Tech: {tech}\n\n"
+                f"### Visible copy\n\n{(fetched.get('visible_text_excerpt') or '')[:1500]}\n"
+            )
+        else:
+            content = (
+                f"## 站点抓取摘要（AI 拆解超时）\n\n"
+                f"- URL：{fetched.get('final_url')}\n"
+                f"- 标题：{fetched.get('title') or '—'}\n"
+                f"- 描述：{fetched.get('description') or '—'}\n"
+                f"- 技术线索：{tech}\n\n"
+                f"### 可见文案\n\n{(fetched.get('visible_text_excerpt') or '')[:1500]}\n"
+            )
+        return {
+            "ok": True,
+            "url": url,
+            "final_url": fetched.get("final_url"),
+            "content": content,
+            "fetch": fetched,
+            "source": "website_ops_partial",
+        }
     return {
         "ok": True,
         "url": url,

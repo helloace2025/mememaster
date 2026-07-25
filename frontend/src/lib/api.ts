@@ -166,26 +166,48 @@ export function analyzeToken(token: Token, opts?: LlmOpts) {
   );
 }
 
+export type TwitterOpsResult = {
+  ok: boolean;
+  username?: string;
+  content: string;
+  tweet_count?: number;
+  tweets?: unknown[];
+  profile?: unknown;
+  source?: string;
+  provider?: string;
+  model?: string;
+};
+
+/** Fast: 6551 tweets only (no LLM). */
+export function twitterFetch(opts: {
+  username?: string;
+  token?: Token;
+  max_tweets?: number;
+  lang?: string;
+}) {
+  return request<TwitterOpsResult>(`/api/twitter/fetch`, {
+    method: "POST",
+    body: JSON.stringify({
+      username: opts.username,
+      token: opts.token ? slimToken(opts.token) : undefined,
+      max_tweets: opts.max_tweets ?? 12,
+      lang: opts.lang || "zh",
+    }),
+  });
+}
+
 export function twitterOps(
   opts: {
     username?: string;
     token?: Token;
     question?: string;
     max_tweets?: number;
+    /** false = timeline only, no LLM */
+    analyze?: boolean;
   } & LlmOpts
 ) {
   const en = (opts.lang || "zh") === "en";
-  return request<{
-    ok: boolean;
-    username?: string;
-    content: string;
-    tweet_count?: number;
-    tweets?: unknown[];
-    profile?: unknown;
-    source?: string;
-    provider?: string;
-    model?: string;
-  }>(`/api/twitter/ops`, {
+  return request<TwitterOpsResult>(`/api/twitter/ops`, {
     method: "POST",
     body: JSON.stringify({
       username: opts.username,
@@ -195,12 +217,14 @@ export function twitterOps(
         (en
           ? "Using only real tweets: teardown launch path — first post hook, concept, project push, visual system"
           : "还原立项路径：第一条推文怎么切入、概念怎么讲、项目怎么推、配图视觉系统怎么立"),
-      max_tweets: opts.max_tweets ?? 20,
+      max_tweets: opts.max_tweets ?? 12,
+      analyze: opts.analyze !== false,
       lang: opts.lang || "zh",
-      provider: opts.provider,
-      model: opts.model,
-      api_key: opts.api_key,
-      base_url: opts.base_url,
+      // Only pass client LLM override when user actually set a key
+      provider: opts.api_key ? opts.provider : undefined,
+      model: opts.api_key ? opts.model : undefined,
+      api_key: opts.api_key || undefined,
+      base_url: opts.api_key ? opts.base_url : undefined,
     }),
   });
 }

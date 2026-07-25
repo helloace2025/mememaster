@@ -10,6 +10,7 @@ import {
   loadFocusToken,
   RequestAbortedError,
   saveFocusToken,
+  twitterFetch,
   twitterOps,
   websiteOps,
 } from "@/lib/api";
@@ -250,81 +251,133 @@ function WorkspaceInner() {
           : `抓取 @${t.twitter_username} 推文…`,
         "run"
       );
+      let hasTimeline = false;
       try {
+        // Phase 1: fast fetch only (no LLM) — always show tweets if 6551 works
+        const fetched = await twitterFetch({
+          username: t.twitter_username,
+          token: t,
+          max_tweets: 12,
+          lang: locale,
+        });
+        if (fetched.ok && (fetched.tweet_count ?? 0) > 0 && fetched.content) {
+          hasTimeline = true;
+          setOpsText(fetched.content);
+          setOpsMeta(
+            [
+              fetched.username ? `@${fetched.username}` : "",
+              en
+                ? `${fetched.tweet_count} posts`
+                : `${fetched.tweet_count} 条`,
+            ]
+              .filter(Boolean)
+              .join(" · ")
+          );
+          agentLog(
+            "twitter",
+            en
+              ? `Tweets loaded · ${fetched.tweet_count}`
+              : `推文已抓到 · ${fetched.tweet_count} 条`,
+            "ok"
+          );
+        }
+
+        // Phase 2: AI teardown (optional; keep timeline if this fails/timeouts)
+        agentLog(
+          "llm",
+          en ? "Writing launch-path teardown…" : "生成立项路径拆解…",
+          "run"
+        );
         const res = await twitterOps({
           token: t,
           username: t.twitter_username,
           question: en
             ? `Teardown @${t.twitter_username} (${t.symbol}) launch path: first post hook, concept intro, project push, visual system. Full answer in English.`
             : `拆解 @${t.twitter_username}（${t.symbol}）的立项路径：第一条推文怎么切入、概念怎么介绍、项目怎么推进、配图视觉系统怎么做。`,
-          ...llmRequestFields(llm, locale),
+          max_tweets: 12,
+          lang: locale,
+          // only pass client LLM override when user set a key
+          ...(llm.apiKey
+            ? {
+                provider: llm.provider,
+                model: llm.model,
+                api_key: llm.apiKey,
+                base_url: llm.baseUrl,
+              }
+            : {}),
         });
-        // Soft API always returns content; never surface HTTP status text
         const body =
           (res.content && String(res.content).trim()) ||
           (en
-            ? "No tweet analysis available. Try Re-run."
-            : "暂无推文分析，请点重新分析。");
-        setOpsText(body);
-        // Product meta only — no model / fetch diagnostics
-        setOpsMeta(
-          [
-            res.username ? `@${res.username}` : "",
-            res.tweet_count != null
-              ? en
-                ? `${res.tweet_count} posts`
-                : `${res.tweet_count} 条`
-              : "",
-          ]
-            .filter(Boolean)
-            .join(" · ")
-        );
-        if (res.ok === false || !(res.tweet_count && res.tweet_count > 0)) {
+            ? "No tweet analysis available."
+            : "暂无推文分析。");
+        if (res.ok !== false && body) {
+          setOpsText(body);
+          setOpsMeta(
+            [
+              res.username ? `@${res.username}` : "",
+              res.tweet_count != null
+                ? en
+                  ? `${res.tweet_count} posts`
+                  : `${res.tweet_count} 条`
+                : "",
+            ]
+              .filter(Boolean)
+              .join(" · ")
+          );
+        }
+        if (res.ok === false && !hasTimeline) {
           agentLog(
             "twitter",
-            en
-              ? `No tweets fetched · ${res.tweet_count ?? 0}`
-              : `未抓到推文，已停止分析（不编造）· ${res.tweet_count ?? 0} 条`,
+            en ? "No tweets fetched" : "未抓到推文",
             "err"
           );
+          setOpsText(body);
           tickAgentProgress(en ? "Twitter empty" : "推特无数据");
         } else {
           agentLog(
             "twitter",
             en
-              ? `Launch path done · ${res.tweet_count} posts`
-              : `立项路径拆解完成 · ${res.tweet_count} 条`,
-            "ok"
-          );
-          agentLog(
-            "llm",
-            en ? "Twitter ops written to middle column" : "推特运营路径写入中间列",
+              ? `Twitter ops done · ${res.tweet_count ?? fetched.tweet_count ?? 0}`
+              : `推特运营完成 · ${res.tweet_count ?? fetched.tweet_count ?? 0} 条`,
             "ok"
           );
           tickAgentProgress(
             en
-              ? `Twitter done · ${res.tweet_count}`
-              : `推特完成 · ${res.tweet_count} 条`
+              ? `Twitter done · ${res.tweet_count ?? fetched.tweet_count ?? 0}`
+              : `推特完成 · ${res.tweet_count ?? fetched.tweet_count ?? 0} 条`
           );
         }
       } catch (e) {
         const raw = e instanceof Error ? e.message : String(e);
-        const friendly =
-          raw === "SERVICE_TEMP_UNAVAILABLE" ||
-          /internal server error/i.test(raw)
-            ? en
-              ? "Tweet analysis is temporarily unavailable. Please try **Re-run** in a moment."
-              : "推文分析暂时不可用，请稍后点 **重新分析**。"
-            : en
-              ? `Could not complete tweet analysis. Please try Re-run.`
-              : `推文分析未完成，请点重新分析再试。`;
-        agentLog(
-          "twitter",
-          en ? "Tweet analysis failed (soft)" : "推文分析失败（已降级）",
-          "err"
-        );
-        setOpsText(friendly);
-        tickAgentProgress(en ? "Twitter failed" : "推特失败");
+        if (hasTimeline) {
+          // Keep phase-1 tweets; only note AI step failed
+          agentLog(
+            "llm",
+            en
+              ? "AI teardown failed — kept tweet timeline"
+              : "AI 拆解失败 — 保留推文时间线",
+            "warn"
+          );
+          tickAgentProgress(en ? "Tweets kept" : "已保留推文");
+        } else {
+          const friendly =
+            raw === "SERVICE_TEMP_UNAVAILABLE" ||
+            /internal server error/i.test(raw)
+              ? en
+                ? "Tweet fetch is temporarily unavailable. Please try **Re-run**."
+                : "推文抓取暂时不可用，请稍后 **重新分析**。"
+              : en
+                ? "Could not fetch tweets. Please try Re-run."
+                : "未能抓取推文，请重新分析。";
+          agentLog(
+            "twitter",
+            en ? "Tweet analysis failed (soft)" : "推文分析失败（已降级）",
+            "err"
+          );
+          setOpsText(friendly);
+          tickAgentProgress(en ? "Twitter failed" : "推特失败");
+        }
       } finally {
         setLoadingO(false);
       }

@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import re
 from typing import Any
-
-import logging
 
 from app.config import Settings
 from app.services.lang import Lang, normalize_lang, with_lang
@@ -357,6 +357,8 @@ async def fetch_twitter_bundle(
     settings: Settings,
     username: str,
     max_tweets: int = 25,
+    *,
+    include_profile: bool = True,
 ) -> dict[str, Any]:
     if not settings.opennews_token:
         raise TwitterError("OPENNEWS_TOKEN is not set")
@@ -369,11 +371,12 @@ async def fetch_twitter_bundle(
     tweets, fetch_notes = await tw.user_tweets_resilient(
         username, max_results=max_tweets
     )
-    try:
-        profile = await tw.user_info(username)
-    except TwitterError as e:
-        profile_error = str(e)
-        log.warning("user_info @%s: %s", username, e)
+    if include_profile:
+        try:
+            profile = await tw.user_info(username)
+        except TwitterError as e:
+            profile_error = str(e)
+            log.warning("user_info @%s: %s", username, e)
 
     tweets_compact = compact_tweets(tweets, max_tweets)
 
@@ -385,6 +388,84 @@ async def fetch_twitter_bundle(
         "tweets_compact": tweets_compact,
         "tweet_count": len(tweets_compact),
         "fetch_notes": fetch_notes,
+    }
+
+
+def format_tweet_timeline(
+    username: str,
+    tweets_compact: list[dict[str, Any]],
+    *,
+    lang: Lang = "zh",
+    note: str = "",
+) -> str:
+    """User-facing timeline markdown — no internal diagnostics."""
+    if lang == "en":
+        lines = [
+            f"## @{username} — {len(tweets_compact)} recent posts",
+            note or "Fetched live from X. AI teardown can refine this further.",
+            "",
+            "### Timeline",
+        ]
+    else:
+        lines = [
+            f"## @{username} — 最近 {len(tweets_compact)} 条推文",
+            note or "已从 X 实时抓取。完整 AI 拆解可在此基础上生成。",
+            "",
+            "### 时间线",
+        ]
+    for i, t in enumerate(tweets_compact[:15], 1):
+        text = str((t or {}).get("text") or "")[:320]
+        tm = str((t or {}).get("time") or "")
+        lines.append(f"{i}. [{tm}] {text}")
+    return "\n".join(lines)
+
+
+async def fetch_twitter_only(
+    settings: Settings,
+    *,
+    username: str,
+    max_tweets: int = 12,
+    lang: str | None = None,
+) -> dict[str, Any]:
+    """Fast path: tweets only, no LLM — used so UI always has content."""
+    L = normalize_lang(lang)
+    username = username.lstrip("@").strip()
+    try:
+        bundle = await fetch_twitter_bundle(
+            settings, username, max_tweets=max_tweets, include_profile=False
+        )
+    except TwitterError as e:
+        log.warning("twitter fetch-only error @%s: %s", username, e)
+        return {
+            "ok": False,
+            "username": username,
+            "tweets": [],
+            "tweet_count": 0,
+            "content": _twitter_fetch_failed_message(username, lang=L),
+            "source": "twitter_error",
+            "error_code": "twitter_api_error",
+            "lang": L,
+        }
+    tweets_compact = bundle.get("tweets_compact") or []
+    if not tweets_compact:
+        return {
+            "ok": False,
+            "username": username,
+            "tweets": [],
+            "tweet_count": 0,
+            "content": _twitter_fetch_failed_message(username, lang=L),
+            "source": "twitter_empty",
+            "error_code": "no_tweets",
+            "lang": L,
+        }
+    return {
+        "ok": True,
+        "username": username,
+        "tweets": tweets_compact,
+        "tweet_count": len(tweets_compact),
+        "content": format_tweet_timeline(username, tweets_compact, lang=L),
+        "source": "twitter_fetch",
+        "lang": L,
     }
 
 
@@ -441,25 +522,7 @@ async def analyze_twitter_ops(
         }
 
     def _timeline_fallback(reason: str = "") -> str:
-        if L == "en":
-            lines = [
-                f"## @{username} — {len(tweets_compact)} tweets",
-                (reason or "Recent posts (timeline summary; full AI teardown skipped)."),
-                "",
-                "### Recent tweets",
-            ]
-        else:
-            lines = [
-                f"## @{username} — {len(tweets_compact)} 条推文",
-                reason or "最近推文摘要（完整 AI 拆解暂不可用）。",
-                "",
-                "### 最近推文",
-            ]
-        for i, t in enumerate(tweets_compact[:15], 1):
-            text = str((t or {}).get("text") or "")[:280]
-            tm = str((t or {}).get("time") or "")
-            lines.append(f"{i}. [{tm}] {text}")
-        return "\n".join(lines)
+        return format_tweet_timeline(username, tweets_compact, lang=L, note=reason)
 
     # Prefer LLM teardown; if model missing/fails, still show real tweets
     if not resolve_llm(
@@ -513,18 +576,41 @@ async def analyze_twitter_ops(
         "rules": rules,
     }
 
-    prompt = prompt_head + json.dumps(user_payload, ensure_ascii=False, default=str)[:24000]
+    prompt = prompt_head + json.dumps(user_payload, ensure_ascii=False, default=str)[:18000]
+    # Hard cap LLM wait — long model calls get killed by Railway/Next proxy as bare 500.
     try:
-        content, resolved = await chat_text(
-            settings,
-            ops_system(L),
-            prompt,
-            provider=provider,
-            model=model,
-            api_key=api_key,
-            base_url=base_url,
-            temperature=0.4,
+        content, resolved = await asyncio.wait_for(
+            chat_text(
+                settings,
+                ops_system(L),
+                prompt,
+                provider=provider,
+                model=model,
+                api_key=api_key,
+                base_url=base_url,
+                temperature=0.4,
+            ),
+            timeout=22.0,
         )
+    except asyncio.TimeoutError:
+        log.warning("twitter ops LLM timeout @%s", username)
+        return {
+            "ok": True,
+            "username": username,
+            "profile": bundle.get("profile"),
+            "tweets": tweets_compact,
+            "tweet_count": bundle.get("tweet_count"),
+            "content": _timeline_fallback(
+                "AI teardown timed out; recent posts listed below."
+                if L == "en"
+                else "AI 拆解超时，以下为最近推文。"
+            ),
+            "provider": None,
+            "model": None,
+            "source": "twitter_ops_partial",
+            "error_code": "llm_timeout",
+            "lang": L,
+        }
     except Exception as llm_err:
         log.warning("twitter ops LLM failed @%s: %s", username, llm_err)
         return {
