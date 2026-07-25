@@ -20,7 +20,7 @@ from app.services.chat import (
 from app.services.gmgn import GmgnClient, GmgnError, normalize_token
 from app.services.lang import disclaimer as lang_disclaimer, normalize_lang
 from app.services.llm import provider_status, resolve_llm
-from app.services.twitter import TwitterClient, TwitterError
+from app.services.twitter import TwitterClient, TwitterError, probe_opennews
 from app.services.website import analyze_website
 
 settings = get_settings()
@@ -210,6 +210,22 @@ async def health() -> dict[str, Any]:
         "interval": settings.hot_interval,
         "hot_max_created": settings.hot_max_created,
         "disclaimer": "仅供研究与教育，非投资建议",
+    }
+
+
+@app.get("/api/debug/twitter")
+async def debug_twitter(
+    username: str = Query(default="elonmusk", description="X handle to probe"),
+) -> dict[str, Any]:
+    """Live probe: can this container reach 6551 and pull tweets? (no LLM)."""
+    result = await probe_opennews(settings, username=username)
+    return {
+        **result,
+        "hint": (
+            "If token_configured=false, set Railway env OPENNEWS_TOKEN. "
+            "If ok=false with network/timeout, outbound to ai.6551.io is blocked. "
+            "If ok=true, tweet fetch works — UI issues are elsewhere."
+        ),
     }
 
 

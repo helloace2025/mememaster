@@ -15,6 +15,12 @@ else
   echo "[mememaster] WARN: GMGN_API_KEY not set — hot board will be empty" >&2
 fi
 
+if [ -n "${OPENNEWS_TOKEN:-}" ]; then
+  echo "[mememaster] OPENNEWS_TOKEN present (len=${#OPENNEWS_TOKEN})"
+else
+  echo "[mememaster] WARN: OPENNEWS_TOKEN not set — Twitter ops will fail" >&2
+fi
+
 if command -v gmgn-cli >/dev/null 2>&1; then
   echo "[mememaster] gmgn-cli: $(gmgn-cli --version 2>/dev/null || echo present)"
 else

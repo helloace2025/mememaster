@@ -1,14 +1,14 @@
 """6551 OpenNews Twitter REST client — resilient fetches.
 
-Uses the same HTTP endpoints documented by the opentwitter skill
-(POST https://ai.6551.io/open/twitter_*), with OPENNEWS_TOKEN Bearer auth.
-No MCP/skill runtime is required inside the Railway container.
+Uses the same HTTP endpoints as the opentwitter skill:
+POST https://ai.6551.io/open/twitter_* with Authorization: Bearer OPENNEWS_TOKEN.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from typing import Any
 
 import httpx
@@ -25,15 +25,26 @@ class TwitterError(Exception):
         self.status = status
 
 
-def _ipv4_transport() -> httpx.AsyncHTTPTransport:
-    # Match gmgn path: force IPv4 on cloud hosts where IPv6 is flaky
-    return httpx.AsyncHTTPTransport(local_address="0.0.0.0")
+def _clean_token(raw: str) -> str:
+    t = (raw or "").strip()
+    # Railway / docker sometimes wrap values in quotes
+    if (t.startswith('"') and t.endswith('"')) or (t.startswith("'") and t.endswith("'")):
+        t = t[1:-1].strip()
+    if t.lower().startswith("bearer "):
+        t = t[7:].strip()
+    return t
 
 
 class TwitterClient:
     def __init__(self, settings: Settings):
-        self.base = settings.opennews_api_base.rstrip("/")
-        self.token = settings.opennews_token
+        self.base = (
+            settings.opennews_api_base
+            or os.environ.get("OPENNEWS_API_BASE")
+            or "https://ai.6551.io"
+        ).rstrip("/")
+        self.token = _clean_token(
+            settings.opennews_token or os.environ.get("OPENNEWS_TOKEN") or ""
+        )
         if not self.token:
             raise TwitterError("OPENNEWS_TOKEN is not set")
 
@@ -42,7 +53,7 @@ class TwitterClient:
             "Authorization": f"Bearer {self.token}",
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "User-Agent": "mememaster/1.0 (opentwitter-compat)",
+            "User-Agent": "mememaster/1.0",
         }
 
     async def post(
@@ -51,83 +62,102 @@ class TwitterClient:
         body: dict[str, Any],
         *,
         retries: int = 2,
-        timeout: float = 45.0,
+        timeout: float = 35.0,
     ) -> Any:
-        """POST with light retries on 429 / 5xx / flaky 400 query-failed."""
+        """POST with retries. Tries default routing, then IPv4-bound transport."""
         url = f"{self.base}{path}"
         last_err: Exception | None = None
+        # 0 = default (works on most hosts); 1 = force IPv4 (helps some IPv6-broken nets)
+        transports: list[httpx.AsyncHTTPTransport | None] = [
+            None,
+            httpx.AsyncHTTPTransport(local_address="0.0.0.0"),
+        ]
 
         for attempt in range(retries + 1):
-            try:
-                async with httpx.AsyncClient(
-                    # Keep short so Railway proxy / Next rewrite does not 500 first
-                    timeout=httpx.Timeout(min(timeout, 28.0), connect=10.0),
-                    transport=_ipv4_transport(),
-                    follow_redirects=True,
-                ) as client:
-                    res = await client.post(url, headers=self._headers(), json=body)
-
+            for transport in transports:
                 try:
-                    data = res.json()
-                except Exception as e:
-                    raise TwitterError(
-                        f"non-JSON from {path}: {res.status_code}",
-                        retryable=res.status_code >= 500,
-                        status=res.status_code,
-                    ) from e
-
-                # business-level failure sometimes returns HTTP 200 with success:false
-                if isinstance(data, dict) and data.get("success") is False:
-                    err = str(data.get("error") or data.get("message") or data)
-                    retryable = "try again" in err.lower() or "rate" in err.lower()
-                    if retryable and attempt < retries:
-                        await asyncio.sleep(0.8 * (attempt + 1))
-                        last_err = TwitterError(f"{path}: {err}", retryable=True, status=res.status_code)
-                        continue
-                    raise TwitterError(f"{path}: {err}", retryable=retryable, status=res.status_code)
-
-                if res.status_code >= 400:
-                    err_msg = data if not isinstance(data, dict) else (
-                        data.get("error") or data.get("message") or data
-                    )
-                    text = str(err_msg)
-                    retryable = (
-                        res.status_code in (408, 425, 429)
-                        or res.status_code >= 500
-                        or "try again" in text.lower()
-                        or "query failed" in text.lower()
-                    )
-                    if retryable and attempt < retries:
-                        await asyncio.sleep(0.8 * (attempt + 1))
-                        last_err = TwitterError(
-                            f"{path} HTTP {res.status_code}: {text}",
-                            retryable=True,
-                            status=res.status_code,
+                    kwargs: dict[str, Any] = {
+                        "timeout": httpx.Timeout(timeout, connect=12.0),
+                        "follow_redirects": True,
+                    }
+                    if transport is not None:
+                        kwargs["transport"] = transport
+                    async with httpx.AsyncClient(**kwargs) as client:
+                        res = await client.post(
+                            url, headers=self._headers(), json=body
                         )
-                        continue
-                    raise TwitterError(
-                        f"{path} HTTP {res.status_code}: {text}",
-                        retryable=retryable,
-                        status=res.status_code,
+                    return self._parse_response(path, res)
+                except TwitterError as e:
+                    last_err = e
+                    if e.retryable and attempt < retries:
+                        await asyncio.sleep(0.6 * (attempt + 1))
+                        break  # next attempt, same transport ladder
+                    # non-retryable: don't try other transport for business errors
+                    if e.status and e.status < 500 and e.status not in (408, 425, 429):
+                        raise
+                    continue
+                except httpx.TimeoutException as e:
+                    last_err = TwitterError(f"{path} timeout", retryable=True)
+                    log.warning("twitter timeout %s attempt=%s", path, attempt + 1)
+                    continue
+                except httpx.HTTPError as e:
+                    last_err = TwitterError(f"{path} network: {e}", retryable=True)
+                    log.warning(
+                        "twitter network %s transport=%s: %s",
+                        path,
+                        "ipv4" if transport else "default",
+                        e,
                     )
-
-                return data
-            except TwitterError:
-                raise
-            except httpx.TimeoutException as e:
-                last_err = TwitterError(f"{path} timeout", retryable=True)
-                if attempt < retries:
-                    await asyncio.sleep(0.8 * (attempt + 1))
                     continue
-                raise last_err from e
-            except httpx.HTTPError as e:
-                last_err = TwitterError(f"{path} network: {e}", retryable=True)
-                if attempt < retries:
-                    await asyncio.sleep(0.8 * (attempt + 1))
-                    continue
-                raise last_err from e
+            else:
+                continue
+            # broke from inner due to retryable TwitterError
+            continue
 
         raise last_err or TwitterError(f"{path} failed")
+
+    def _parse_response(self, path: str, res: httpx.Response) -> Any:
+        try:
+            data = res.json()
+        except Exception as e:
+            raise TwitterError(
+                f"non-JSON from {path}: {res.status_code}",
+                retryable=res.status_code >= 500,
+                status=res.status_code,
+            ) from e
+
+        # Top-level business failure
+        if isinstance(data, dict) and data.get("success") is False:
+            err = str(data.get("error") or data.get("message") or data)
+            retryable = (
+                "try again" in err.lower()
+                or "rate" in err.lower()
+                or "query failed" in err.lower()
+            )
+            raise TwitterError(
+                f"{path}: {err}", retryable=retryable, status=res.status_code
+            )
+
+        if res.status_code >= 400:
+            err_msg = (
+                data
+                if not isinstance(data, dict)
+                else (data.get("error") or data.get("message") or data)
+            )
+            text = str(err_msg)
+            retryable = (
+                res.status_code in (408, 425, 429)
+                or res.status_code >= 500
+                or "try again" in text.lower()
+                or "query failed" in text.lower()
+            )
+            raise TwitterError(
+                f"{path} HTTP {res.status_code}: {text}",
+                retryable=retryable,
+                status=res.status_code,
+            )
+
+        return data
 
     async def user_info(self, username: str) -> dict[str, Any] | None:
         username = username.lstrip("@").strip()
@@ -171,11 +201,6 @@ class TwitterClient:
         *,
         product: str = "Latest",
     ) -> list[dict[str, Any]]:
-        """twitter_search fromUser — often richer than twitter_user_tweets.
-
-        6551's /open/twitter_user_tweets frequently returns only 1 (pinned/featured)
-        post for brand accounts, while search returns a real timeline.
-        """
         username = username.lstrip("@").strip()
         if not username:
             return []
@@ -189,7 +214,6 @@ class TwitterClient:
             retries=1,
         )
         items = self._extract_tweet_list(data)
-        # keep only posts authored by this handle (search can occasionally mix)
         uname = username.lower()
         filtered: list[dict[str, Any]] = []
         for t in items:
@@ -202,7 +226,7 @@ class TwitterClient:
                 or t.get("user_name")
                 or ""
             ).lstrip("@").lower()
-            # if author missing, keep (upstream sometimes omits field)
+            # Keep if author missing or matches (case-insensitive)
             if author and author != uname:
                 continue
             filtered.append(t)
@@ -214,7 +238,6 @@ class TwitterClient:
             v = t.get(k)
             if v is not None and str(v).strip():
                 return str(v).strip()
-        # fallback: text+time fingerprint
         text = str(t.get("text") or t.get("full_text") or t.get("content") or "")[:120]
         tm = str(t.get("createdAt") or t.get("created_at") or t.get("time") or "")
         return f"{tm}|{text}"
@@ -246,21 +269,14 @@ class TwitterClient:
         max_results: int = 20,
     ) -> tuple[list[dict[str, Any]], list[str]]:
         """
-        Multi-strategy fetch for ops analysis — optimized for speed + yield.
-
-        6551 quirk: ``twitter_user_tweets`` often returns only 1 post.
-        ``twitter_search`` + ``fromUser`` usually returns a full page.
-
-        Order (fast path first):
-        1. search Latest / Top
-        2. one user_tweets Latest pass if still thin
+        Fast path: search fromUser first (full timeline).
+        Fallback: one user_tweets call.
         """
         username = username.lstrip("@").strip()
         notes: list[str] = []
         collected: list[dict[str, Any]] = []
         target = max(5, min(max_results, 20))
 
-        # 1) Primary: search fromUser (usually full timeline)
         for product in ("Latest", "Top"):
             try:
                 searched = await self.search_from_user(
@@ -272,18 +288,16 @@ class TwitterClient:
                         collected, searched, limit=max_results
                     )
                     notes.append(
-                        f"search product={product} raw={len(searched)} "
-                        f"merged={len(collected)} (+{len(collected) - before})"
+                        f"search/{product} +{len(collected) - before} total={len(collected)}"
                     )
                     if len(collected) >= target:
                         break
                 else:
-                    notes.append(f"search product={product} empty")
+                    notes.append(f"search/{product} empty")
             except TwitterError as e:
-                notes.append(f"search product={product} fail")
-                log.warning("search_from_user %s %s: %s", username, product, e)
+                notes.append(f"search/{product} fail")
+                log.warning("search_from_user @%s %s: %s", username, product, e)
 
-        # 2) Fallback: single user_tweets call (avoid 4× sequential rounds)
         if len(collected) < target:
             try:
                 tweets = await self.user_tweets(
@@ -299,20 +313,18 @@ class TwitterClient:
                         collected, tweets, limit=max_results
                     )
                     notes.append(
-                        f"user_tweets Latest raw={len(tweets)} "
-                        f"merged={len(collected)} (+{len(collected) - before})"
+                        f"user_tweets +{len(collected) - before} total={len(collected)}"
                     )
             except TwitterError as e:
                 notes.append("user_tweets fail")
-                log.warning("user_tweets %s: %s", username, e)
+                log.warning("user_tweets @%s: %s", username, e)
 
-        if notes:
-            log.info(
-                "user_tweets_resilient @%s n=%s notes=%s",
-                username,
-                len(collected),
-                " | ".join(notes[:6]),
-            )
+        log.info(
+            "twitter resilient @%s count=%s notes=%s",
+            username,
+            len(collected),
+            " | ".join(notes[:6]),
+        )
         return collected[:max_results], notes
 
     @staticmethod
@@ -344,3 +356,39 @@ class TwitterClient:
                 if any(k in v[0] for k in ("text", "full_text", "content", "id")):
                     return [x for x in v if isinstance(x, dict)]
         return []
+
+
+async def probe_opennews(settings: Settings, username: str = "elonmusk") -> dict[str, Any]:
+    """Connectivity check for health/debug — no LLM."""
+    out: dict[str, Any] = {
+        "token_configured": bool(
+            _clean_token(settings.opennews_token or os.environ.get("OPENNEWS_TOKEN") or "")
+        ),
+        "base": (settings.opennews_api_base or "https://ai.6551.io").rstrip("/"),
+        "username": username.lstrip("@").strip(),
+    }
+    if not out["token_configured"]:
+        out["ok"] = False
+        out["error"] = "OPENNEWS_TOKEN not set"
+        return out
+    try:
+        tw = TwitterClient(settings)
+        tweets, notes = await tw.user_tweets_resilient(out["username"], max_results=5)
+        out["ok"] = len(tweets) > 0
+        out["tweet_count"] = len(tweets)
+        out["sample"] = [
+            {
+                "text": str(t.get("text") or t.get("full_text") or "")[:120],
+                "time": str(t.get("createdAt") or t.get("created_at") or ""),
+            }
+            for t in tweets[:3]
+            if isinstance(t, dict)
+        ]
+        out["notes"] = notes[:4]
+        if not tweets:
+            out["error"] = "API reachable but returned 0 tweets"
+    except Exception as e:
+        out["ok"] = False
+        out["error"] = str(e)[:300]
+        log.warning("probe_opennews failed: %s", e)
+    return out

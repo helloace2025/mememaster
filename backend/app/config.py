@@ -19,10 +19,24 @@ class Settings(BaseSettings):
     gmgn_api_base: str = "https://gmgn.ai/defi/quotation/v1"
     gmgn_default_chain: str = "sol"
 
-    # 6551 / OpenNews
+    # 6551 / OpenNews (Twitter). Railway: set OPENNEWS_TOKEN exactly.
     opennews_token: str = ""
     opennews_api_base: str = "https://ai.6551.io"
     opennews_ws_base: str = "wss://ai.6551.io/open/twitter_wss"
+
+    def model_post_init(self, __context: object) -> None:  # pydantic v2
+        # Strip accidental quotes/whitespace from dashboard env pastes
+        if self.opennews_token:
+            t = self.opennews_token.strip()
+            if (t.startswith('"') and t.endswith('"')) or (
+                t.startswith("'") and t.endswith("'")
+            ):
+                t = t[1:-1].strip()
+            if t.lower().startswith("bearer "):
+                t = t[7:].strip()
+            object.__setattr__(self, "opennews_token", t)
+        if self.gmgn_api_key:
+            object.__setattr__(self, "gmgn_api_key", self.gmgn_api_key.strip())
 
     dexscreener_api_base: str = "https://api.dexscreener.com"
 

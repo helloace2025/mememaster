@@ -440,6 +440,48 @@ async def analyze_twitter_ops(
             "error_code": "no_tweets",
         }
 
+    def _timeline_fallback(reason: str = "") -> str:
+        if L == "en":
+            lines = [
+                f"## @{username} — {len(tweets_compact)} tweets",
+                (reason or "Recent posts (timeline summary; full AI teardown skipped)."),
+                "",
+                "### Recent tweets",
+            ]
+        else:
+            lines = [
+                f"## @{username} — {len(tweets_compact)} 条推文",
+                reason or "最近推文摘要（完整 AI 拆解暂不可用）。",
+                "",
+                "### 最近推文",
+            ]
+        for i, t in enumerate(tweets_compact[:15], 1):
+            text = str((t or {}).get("text") or "")[:280]
+            tm = str((t or {}).get("time") or "")
+            lines.append(f"{i}. [{tm}] {text}")
+        return "\n".join(lines)
+
+    # Prefer LLM teardown; if model missing/fails, still show real tweets
+    if not resolve_llm(
+        settings, provider, model, api_key_override=api_key, base_url_override=base_url
+    ):
+        return {
+            "ok": True,
+            "username": username,
+            "profile": bundle.get("profile"),
+            "tweets": tweets_compact,
+            "tweet_count": bundle.get("tweet_count"),
+            "content": _timeline_fallback(
+                "No LLM configured — showing fetched tweets only."
+                if L == "en"
+                else "未配置模型 — 仅展示已抓取推文。"
+            ),
+            "provider": None,
+            "model": None,
+            "source": "twitter_timeline_only",
+            "lang": L,
+        }
+
     if L == "en":
         q_default = "Using only real tweets, teardown launch path and social ops"
         rules = "Use only recent_tweets; never invent missing posts. Analysis in English."
@@ -455,7 +497,6 @@ async def analyze_twitter_ops(
             "没有写在推文里的内容不要编造：\n"
         )
 
-    # Never send internal fetch diagnostics to the model (leaks into UI prose).
     user_payload = {
         "question": question or q_default,
         "lang": L,
@@ -485,33 +526,18 @@ async def analyze_twitter_ops(
             temperature=0.4,
         )
     except Exception as llm_err:
-        # Tweets OK — surface a clean summary, no stack/API internals
         log.warning("twitter ops LLM failed @%s: %s", username, llm_err)
-        if L == "en":
-            lines = [
-                f"## @{username} — {len(tweets_compact)} tweets fetched",
-                "Model analysis failed; recent posts listed below.",
-                "",
-                "### Recent tweets",
-            ]
-        else:
-            lines = [
-                f"## @{username} — 已抓取 {len(tweets_compact)} 条推文",
-                "模型分析暂时失败，以下为最近推文摘要。",
-                "",
-                "### 最近推文",
-            ]
-        for i, t in enumerate(tweets_compact[:12], 1):
-            text = str((t or {}).get("text") or "")[:220]
-            tm = str((t or {}).get("time") or "")
-            lines.append(f"{i}. [{tm}] {text}")
         return {
             "ok": True,
             "username": username,
             "profile": bundle.get("profile"),
             "tweets": tweets_compact,
             "tweet_count": bundle.get("tweet_count"),
-            "content": "\n".join(lines),
+            "content": _timeline_fallback(
+                "Model analysis failed; recent posts listed below."
+                if L == "en"
+                else "模型分析失败，以下为最近推文。"
+            ),
             "provider": None,
             "model": None,
             "source": "twitter_ops_partial",
@@ -523,7 +549,7 @@ async def analyze_twitter_ops(
         "ok": True,
         "username": username,
         "profile": bundle.get("profile"),
-        "tweets": bundle.get("tweets_compact"),
+        "tweets": tweets_compact,
         "tweet_count": bundle.get("tweet_count"),
         "content": content,
         "provider": resolved.provider_id,
