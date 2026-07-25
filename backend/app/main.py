@@ -110,6 +110,18 @@ class WebsiteOpsBody(BaseModel):
     base_url: str | None = None
 
 
+@app.get("/")
+async def root() -> dict[str, Any]:
+    """Avoid empty 404 when only the API service is exposed."""
+    return {
+        "service": "MemeMaster API",
+        "ok": True,
+        "docs": "/docs",
+        "health": "/api/health",
+        "hint": "This is the API. The full website is the Next.js app (unified Docker or separate frontend service).",
+    }
+
+
 @app.get("/api/health")
 async def health() -> dict[str, Any]:
     active = resolve_llm(settings)

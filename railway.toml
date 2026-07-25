@@ -1,10 +1,9 @@
-# When this service's Root Directory is the **repo root**, build the API.
-# For the web UI: add another service, set Root Directory = frontend.
+# Single Railway service: unified Next.js UI + FastAPI (see root Dockerfile)
 [build]
 builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
 healthcheckPath = "/api/health"
-healthcheckTimeout = 30
+healthcheckTimeout = 60
 restartPolicyType = "ON_FAILURE"

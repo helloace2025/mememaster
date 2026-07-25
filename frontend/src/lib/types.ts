@@ -142,7 +142,19 @@ export const CHAINS = [
 
 export const ALL_CHAIN_IDS = CHAINS.map((c) => c.id);
 
-export const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000";
+/**
+ * API origin for browser fetches.
+ * - Local dev: default http://127.0.0.1:8000
+ * - Unified Railway image: set NEXT_PUBLIC_API_BASE="" at build → same-origin /api/*
+ * - Split FE service: set full API URL e.g. https://xxx.up.railway.app
+ */
+function resolveApiBase(): string {
+  const v = process.env.NEXT_PUBLIC_API_BASE;
+  if (v === "" || v === "same" || v === "/") return "";
+  if (typeof v === "string" && v.length > 0) return v.replace(/\/$/, "");
+  return "http://127.0.0.1:8000";
+}
+
+export const API_BASE = resolveApiBase();
 
 export const TOKEN_CACHE_KEY = "mm_focus_token";
