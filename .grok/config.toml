@@ -1,0 +1,14 @@
+# Token is injected from process env (set OPENNEWS_TOKEN before launching Grok).
+# Do not hardcode secrets in this file.
+[mcp_servers.twitter]
+command = "uv"
+args = [
+    "--directory",
+    'C:\Users\Dell\Desktop\mememaster\tools\opentwitter-mcp',
+    "run",
+    "twitter-mcp",
+]
+enabled = true
+
+[mcp_servers.twitter.env]
+OPENNEWS_TOKEN = "${OPENNEWS_TOKEN}"

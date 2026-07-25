@@ -1,0 +1,43 @@
+# secrets
+.env
+.env.local
+.env.*.local
+
+# python / node
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+node_modules/
+.next/
+dist/
+build/
+*.egg-info/
+
+# local tools clones / caches
+tools/opentwitter-mcp/.venv/
+*.pem
+keypair.pem
+
+# ide / os
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# logs / data
+*.log
+.tmp/
+data/raw/
+frontend/dev.out.log
+frontend/dev.err.log
+backend.out.log
+backend.err.log
+
+# next standalone (if generated outside Docker)
+frontend/.next/standalone/
+
+# local secrets
+frontend/.env.local
+.env.production
+*.local

@@ -1,0 +1,144 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --bg: #f7f7f8;
+  --bg-elevated: #ffffff;
+  --bg-sidebar: #f7f7f8;
+  --border: #e5e5e8;
+  --text: #0d0d0d;
+  --text-secondary: #6b6b76;
+  --text-muted: #9b9ba8;
+  --accent: #10a37f;
+  --accent-soft: #e7f7f2;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 16px rgba(0, 0, 0, 0.04);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    "PingFang SC",
+    "Microsoft YaHei",
+    "Noto Sans SC",
+    Arial,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.mm-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.mm-scroll::-webkit-scrollbar-thumb {
+  background: #d4d4d8;
+  border-radius: 999px;
+}
+
+/* agent terminal: wheel scroll without visible scrollbar */
+.mm-term-scroll {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE/legacy Edge */
+}
+.mm-term-scroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none; /* Chrome / Safari / Edge */
+}
+
+/* blinking caret for typewriter status */
+.mm-term-caret {
+  display: inline-block;
+  width: 0.55ch;
+  height: 1.05em;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  background: #34d399;
+  box-shadow: 0 0 6px rgba(52, 211, 153, 0.7);
+  animation: mm-caret-blink 1s step-end infinite;
+}
+
+@keyframes mm-caret-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+/* sequential drop-in like Okara terminal lines */
+.mm-term-line-in {
+  animation: mm-term-line-in 0.38s ease-out both;
+}
+
+@keyframes mm-term-line-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.mm-term-pulse {
+  animation: mm-term-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes mm-term-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/* header agent drawer — height animation via grid-rows */
+.mm-term-drawer {
+  will-change: grid-template-rows;
+}
+
+/* right-column chat: long assistant docs */
+.mm-chat-assistant {
+  /* keep headings from sticking too tight to previous list */
+}
+.mm-chat-assistant h3 {
+  letter-spacing: -0.01em;
+}
+.mm-chat-user {
+  word-break: break-word;
+}
+
+/* indeterminate progress shimmer across the top bar */
+.mm-progress-indeterminate {
+  animation: mm-progress-slide 1.15s ease-in-out infinite;
+}
+
+@keyframes mm-progress-slide {
+  0% {
+    left: -35%;
+  }
+  100% {
+    left: 100%;
+  }
+}
