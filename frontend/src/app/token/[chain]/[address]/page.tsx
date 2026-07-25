@@ -38,8 +38,20 @@ function uid() {
   return `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 }
 
-function gmgnUrl(chain: string, address: string) {
-  return `https://gmgn.ai/${chain}/token/${address}`;
+/** Public chart page — neutral third-party, not our data-vendor brand. */
+function publicChartUrl(chain: string, address: string) {
+  const c = (chain || "sol").toLowerCase();
+  const path =
+    c === "sol" || c === "robinhood"
+      ? "solana"
+      : c === "eth"
+        ? "ethereum"
+        : c === "bsc"
+          ? "bsc"
+          : c === "base"
+            ? "base"
+            : "solana";
+  return `https://dexscreener.com/${path}/${address}`;
 }
 
 export default function TokenWorkspacePage() {
@@ -673,7 +685,7 @@ function WorkspaceInner() {
                 </a>
               )}
               <a
-                href={gmgnUrl(token.chain, token.address)}
+                href={publicChartUrl(token.chain, token.address)}
                 target="_blank"
                 rel="noreferrer"
                 className="text-zinc-500 hover:underline"
