@@ -6,6 +6,8 @@ import type { Token } from "@/lib/types";
 import RichText from "@/components/RichText";
 import ChatComposer, { type ChatAttachment } from "@/components/ChatComposer";
 import { loadLlmPrefs, llmRequestFields, type LlmPrefs } from "@/lib/llmPrefs";
+import { useI18n } from "@/lib/i18n/I18nProvider";
+import type { Locale } from "@/lib/i18n/locales";
 
 type Msg = {
   id: string;
@@ -19,63 +21,66 @@ function uid() {
 }
 
 /** Preset chips: case study → extend (learn structure, not copy). */
-function buildChatChips(focus: Token | null) {
-  const sym = focus?.symbol ? `$${focus.symbol}` : "当前对标盘";
-  const nameBit = focus
-    ? `以看板带入的对标 ${sym}${focus.name ? `（${focus.name}）` : ""} 为案例`
-    : "以我描述的对标/热门类型为案例";
+function buildChatChips(
+  focus: Token | null,
+  locale: Locale,
+  t: (k: string, p?: Record<string, string | number>) => string
+) {
+  const sym = focus?.symbol ? `$${focus.symbol}` : locale === "en" ? "this reference" : "当前对标盘";
+  const nameBit =
+    locale === "en"
+      ? focus
+        ? `Using board reference ${sym}${focus.name ? ` (${focus.name})` : ""} as a case study`
+        : "Using the reference type I describe as a case study"
+      : focus
+        ? `以看板带入的对标 ${sym}${focus.name ? `（${focus.name}）` : ""} 为案例`
+        : "以我描述的对标/热门类型为案例";
+
+  const langNote =
+    locale === "en"
+      ? "Reply in English. Research only, not investment advice. Learn structure — do not copy skin."
+      : "用中文回复。研究教育，非投资建议。学结构不抄皮。";
 
   return [
     {
-      label: "同类延伸选题",
+      label: t("chat.chip.extend"),
       prompt: [
-        `${nameBit}，请做「学结构、不抄皮」的延伸选题。`,
+        `${nameBit}.`,
+        locale === "en"
+          ? "Produce 3–5 **similar / extension product** directions (same meta or portable structure). Not clones."
+          : "请做「学结构、不抄皮」的延伸选题：产出 **3–5 个同类/延伸产品方向**（同一赛道或可迁移结构变体），不是复制。",
         "",
-        "目标：不是复制这个币，而是拆它为什么能热，再产出 **3–5 个同类/延伸产品方向**（同一赛道或可迁移结构的变体）。",
-        "",
-        "请用清晰 Markdown，每个方向单独一小节：",
-        "### 方向 N：名称草案",
-        "- **可学结构**（从对标迁移什么：情绪/身份/玩法/节奏，勿抄商标与角色皮）",
-        "- **必须换的皮**（名字、IP、文案、视觉差异点）",
-        "- **一句话立项**（小孩也能复述）",
-        "- **和原盘的差异**（为什么不是山寨）",
-        "- **风险**（同质化/版权/叙事撞车）",
-        "",
-        "最后给一段「怎么选」的简短建议。研究教育用途，非投资建议。",
+        locale === "en"
+          ? "For each direction: portable structure · must-change skin · one-liner · difference vs original · risks. Clear Markdown."
+          : "每个方向：可学结构 · 必须换的皮 · 一句话立项 · 与原盘差异 · 风险。清晰 Markdown 分节。",
+        langNote,
       ].join("\n"),
     },
     {
-      label: "可迁移结构清单",
+      label: t("chat.chip.structure"),
       prompt: [
-        `${nameBit}，请只拆「可复用结构」，不要给照抄方案。`,
-        "",
-        "输出：",
-        "## 1. 它的热度结构（叙事钩子 / 身份口令 / 视觉门面 / 社交节奏，各 1–3 点，有证据写证据）",
-        "## 2. 可迁移到我盘的 checklist（`- [ ]`）",
-        "## 3. 绝对不能抄的红线（皮相、假官方、商标等）",
-        "## 4. 若我做同类盘，最小差异化 3 刀",
-        "",
-        "学结构不抄皮。非投资建议。",
+        `${nameBit}.`,
+        locale === "en"
+          ? "Extract only **portable structure** (narrative / identity / visual / cadence). Checklist + red lines + 3 minimal differentiators."
+          : "请只拆「可复用结构」：叙事/身份/视觉/节奏；checklist；绝对不能抄的红线；同类盘最小差异化 3 刀。",
+        langNote,
       ].join("\n"),
     },
     {
-      label: "我的盘一句话立项",
+      label: t("chat.chip.oneliner"),
       prompt: [
-        `${nameBit}，请基于其结构，帮我写 **我自己的盘** 的立项表述（换皮后的版本）。`,
-        "",
-        "输出：",
-        "1. 对标结构一句话（它在卖什么情绪/身份）",
-        "2. 我的盘 3 个一句话立项草案（可直接当 bio/首屏）",
-        "3. 每个草案附：目标人群、差异尖点、忌碰点",
-        "4. 推荐采用哪一个及原因",
-        "",
-        "禁止复述对标原文口号当我的方案。非投资建议。",
+        `${nameBit}.`,
+        locale === "en"
+          ? "Write **my own** one-liner pitch drafts (reskinned). 3 options + audience + tip + what not to copy."
+          : "请写 **我自己的盘** 一句话立项草案（换皮版）3 个，并附目标人群、尖点、忌碰点；禁止复述对标口号。",
+        langNote,
       ].join("\n"),
     },
   ];
 }
 
 export default function ChatPage() {
+  const { t, locale } = useI18n();
   const [focus, setFocus] = useState<Token | null>(null);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
@@ -92,30 +97,34 @@ export default function ChatPage() {
     setLlm(loadLlmPrefs());
     setPrefsReady(true);
 
-    const t = loadFocusToken();
-    setFocus(t);
-    if (welcomeSeeded.current) return;
-    welcomeSeeded.current = true;
-    const ctx = t?.symbol
-      ? `当前上下文：**$${t.symbol}**${t.name ? ` · ${t.name}` : ""}。以下快捷提问会以它为**案例**做延伸，而不是照抄。`
-      : `尚未带入看板代币。可先去「看板」点进一个热门盘，或在输入框里描述对标类型（如 AI meme / 动物盘）。`;
-    setMessages([
-      {
-        id: uid(),
-        role: "assistant",
-        content: [
-          "这里是**共创对话**：用热门盘当**案例**，学可迁移结构，产出**同类/延伸产品**选题。",
-          "",
-          "- 对标 = 结构参考，不是文案与角色皮的复制模板",
-          "- 扫盘去「看板」；拆单盘去分析工作台",
-          "",
-          ctx,
-          "",
-          "下方快捷按钮：**同类延伸选题** · **可迁移结构** · **我的盘一句话立项**。",
-        ].join("\n"),
-      },
-    ]);
+    const tok = loadFocusToken();
+    setFocus(tok);
   }, []);
+
+  // Welcome message follows locale (and focus)
+  useEffect(() => {
+    if (!prefsReady) return;
+    const namePart = focus?.name ? ` · ${focus.name}` : "";
+    const ctx = focus?.symbol
+      ? t("chat.welcome.ctx", {
+          symbol: focus.symbol,
+          name: namePart,
+        })
+      : t("chat.welcome.noCtx");
+    const welcome = t("chat.welcome", { ctx });
+    if (!welcomeSeeded.current) {
+      welcomeSeeded.current = true;
+      setMessages([{ id: uid(), role: "assistant", content: welcome }]);
+      return;
+    }
+    // When language toggles, refresh the first assistant welcome if still the only/first system-like msg
+    setMessages((prev) => {
+      if (prev.length === 1 && prev[0].role === "assistant") {
+        return [{ ...prev[0], content: welcome }];
+      }
+      return prev;
+    });
+  }, [locale, focus, prefsReady, t]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -217,15 +226,15 @@ export default function ChatPage() {
     ? ""
     : llm.provider || llm.model
       ? `${llm.provider || "auto"}${llm.model ? ` · ${llm.model}` : ""}`
-      : "未选模型（用 .env 默认）";
+      : t("chat.noModel");
 
   return (
     <div className="flex h-full flex-col">
       <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-[var(--border)] bg-white px-5">
         <div className="min-w-0">
-          <h1 className="text-sm font-semibold">共创对话</h1>
+          <h1 className="text-sm font-semibold">{t("chat.title")}</h1>
           <p className="text-xs text-[var(--text-muted)]">
-            选题 · 结构延伸 · 同类产品
+            {t("chat.subtitle")}
             {modelHint ? (
               <span className="ml-2 font-mono text-[10px] text-zinc-400">
                 {modelHint}
@@ -235,7 +244,7 @@ export default function ChatPage() {
         </div>
         {focus?.symbol ? (
           <div className="hidden rounded-full bg-zinc-100 px-3 py-1 text-xs text-zinc-600 sm:block">
-            上下文：{focus.symbol}
+            {t("chat.context", { symbol: focus.symbol })}
           </div>
         ) : null}
       </header>
@@ -254,7 +263,7 @@ export default function ChatPage() {
                     : "bg-[var(--accent-soft)] text-[var(--accent)]"
                 }`}
               >
-                {m.role === "user" ? "你" : "M"}
+                {m.role === "user" ? t("chat.you") : "M"}
               </div>
               <div
                 className={`max-w-[min(100%,36rem)] rounded-2xl px-4 py-3 text-[15px] leading-relaxed ${
@@ -277,7 +286,9 @@ export default function ChatPage() {
             </div>
           ))}
           {busy && (
-            <p className="text-center text-sm text-zinc-400">思考中…</p>
+            <p className="text-center text-sm text-zinc-400">
+              {t("chat.thinking")}
+            </p>
           )}
           {error && (
             <p className="text-center text-sm text-rose-600">{error}</p>
@@ -295,11 +306,11 @@ export default function ChatPage() {
             onStop={stop}
             placeholder={
               focus?.symbol
-                ? `以 $${focus.symbol} 为案例，问：同类还能做什么？结构怎么迁？…`
-                : "描述对标类型或你的 idea；或先从看板带入一个热门盘…"
+                ? t("chat.placeholderFocus", { symbol: focus.symbol })
+                : t("chat.placeholder")
             }
-            chips={buildChatChips(focus)}
-            onChip={(t) => void send(t)}
+            chips={buildChatChips(focus, locale, t)}
+            onChip={(prompt) => void send(prompt)}
             llm={llm}
             onLlmChange={setLlm}
             onSend={({ text, attachments }) => {

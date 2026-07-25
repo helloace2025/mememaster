@@ -24,18 +24,13 @@ import {
   endAgentSession,
   startAgentSession,
 } from "@/lib/agentLog";
+import { useI18n } from "@/lib/i18n/I18nProvider";
 
-const AGE_OPTIONS = [
-  { id: "24h", label: "24h 内" },
-  { id: "3d", label: "3 天内" },
-  { id: "7d", label: "7 天内" },
-  { id: "14d", label: "14 天内" },
-  { id: "30d", label: "30 天内" },
-  { id: "all", label: "不限（含老币）" },
-] as const;
+const AGE_OPTION_IDS = ["24h", "3d", "7d", "14d", "30d", "all"] as const;
 
 export default function DashboardPage() {
   const router = useRouter();
+  const { t: tr } = useI18n();
   const prefs = typeof window !== "undefined" ? loadHotUiPrefs() : {};
   const [chain, setChain] = useState(prefs.chain || "sol");
   const [interval, setInterval] = useState(
@@ -47,7 +42,7 @@ export default function DashboardPage() {
     [20, 50, 100].includes(Number(prefs.limit)) ? Number(prefs.limit) : 50
   );
   const [maxCreated, setMaxCreated] = useState(
-    AGE_OPTIONS.some((o) => o.id === prefs.maxCreated)
+    AGE_OPTION_IDS.includes(prefs.maxCreated as (typeof AGE_OPTION_IDS)[number])
       ? (prefs.maxCreated as string)
       : "7d"
   );
@@ -314,29 +309,28 @@ export default function DashboardPage() {
     return () => window.clearTimeout(t);
   }, [q, chain, lookupCustom]);
 
-  const cacheLabel = useMemo(() => {
+  const hasData = Object.values(byChain).some((t) => t.length > 0);
+  const ageLabel = tr(`board.age.${maxCreated}` as "board.age.7d") || maxCreated;
+
+  const cacheLabelI18n = useMemo(() => {
     if (!fetchedAt) return null;
     const age = formatCacheAge(fetchedAt);
     const fresh = isHotCacheFresh(fetchedAt, HOT_CACHE_TTL_MS);
-    if (revalidating) return `缓存 ${age} · 后台更新中…`;
-    if (fromCache && fresh) return `缓存 · ${age}`;
-    if (fromCache && !fresh) return `缓存偏旧 · ${age}`;
-    return `已更新 · ${age}`;
-  }, [fetchedAt, fromCache, revalidating]);
-
-  const hasData = Object.values(byChain).some((t) => t.length > 0);
-  const ageLabel =
-    AGE_OPTIONS.find((o) => o.id === maxCreated)?.label || maxCreated;
+    if (revalidating) return tr("board.revalidating", { age });
+    if (fromCache && fresh) return tr("board.cacheFresh", { age });
+    if (fromCache && !fresh) return tr("board.cacheStale", { age });
+    return tr("board.updated", { age });
+  }, [fetchedAt, fromCache, revalidating, tr]);
 
   return (
     <div className="flex h-full flex-col">
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--border)] bg-white px-5">
         <div>
-          <h1 className="text-sm font-semibold">看板 · 全链新币热门</h1>
+          <h1 className="text-sm font-semibold">{tr("board.title")}</h1>
           <p className="text-xs text-[var(--text-muted)]">
-            默认过滤老币 · 聚焦新叙事（{ageLabel}）
-            {cacheLabel && (
-              <span className="ml-2 text-emerald-700">· {cacheLabel}</span>
+            {tr("board.subtitle", { age: ageLabel })}
+            {cacheLabelI18n && (
+              <span className="ml-2 text-emerald-700">· {cacheLabelI18n}</span>
             )}
           </p>
         </div>
@@ -346,7 +340,7 @@ export default function DashboardPage() {
           disabled={loading || revalidating}
           className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-600 disabled:opacity-50"
         >
-          {loading || revalidating ? "刷新中…" : "强制刷新"}
+          {loading || revalidating ? tr("board.refreshing") : tr("board.refresh")}
         </button>
       </header>
 
@@ -378,9 +372,9 @@ export default function DashboardPage() {
             onChange={(e) => setMaxCreated(e.target.value)}
             title="只看创建多久以内的币，过滤老牌高量币"
           >
-            {AGE_OPTIONS.map((o) => (
-              <option key={o.id} value={o.id}>
-                币龄 {o.label}
+            {AGE_OPTION_IDS.map((id) => (
+              <option key={id} value={id}>
+                {tr("board.age", { label: tr(`board.age.${id}`) })}
               </option>
             ))}
           </select>
@@ -393,7 +387,7 @@ export default function DashboardPage() {
           >
             {["1h", "6h", "24h"].map((v) => (
               <option key={v} value={v}>
-                热度 {v}
+                {tr("board.heat", { v })}
               </option>
             ))}
           </select>
@@ -405,7 +399,7 @@ export default function DashboardPage() {
           >
             {[20, 50, 100].map((v) => (
               <option key={v} value={v}>
-                每链 {v}
+                {tr("board.perChain", { v })}
               </option>
             ))}
           </select>
@@ -422,7 +416,7 @@ export default function DashboardPage() {
                   }
                 }
               }}
-              placeholder="搜索 symbol / 名称，或粘贴合约 CA"
+              placeholder={tr("board.searchPh")}
               className="min-w-0 flex-1 rounded-lg border border-[var(--border)] px-3 py-1.5 font-mono text-sm outline-none focus:border-emerald-300"
               spellCheck={false}
             />
@@ -432,27 +426,19 @@ export default function DashboardPage() {
               onClick={() => {
                 if (looksLikeContractAddress(q)) {
                   void lookupCustom(q, true);
-                } else {
-                  // non-CA: just keep filter; no-op button for UX
                 }
               }}
               className="shrink-0 rounded-lg bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-800 disabled:opacity-40"
-              title={
-                looksLikeContractAddress(q)
-                  ? "查询 CA 并打开分析"
-                  : "按名称筛选列表；粘贴 CA 可查自定义代币"
-              }
             >
               {customLoading
-                ? "查询中…"
+                ? tr("board.lookingUp")
                 : looksLikeContractAddress(q)
-                  ? "查 CA"
-                  : "筛选"}
+                  ? tr("board.lookupCa")
+                  : tr("board.filter")}
             </button>
           </div>
           <label
             className="flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-[11px] text-zinc-600"
-            title="推特已注销/只剩数字 ID 的盘，默认隐藏"
           >
             <input
               type="checkbox"
@@ -460,28 +446,27 @@ export default function DashboardPage() {
               onChange={(e) => setHideDeadSocial(e.target.checked)}
               className="rounded border-zinc-300"
             />
-            隐藏失效 X
+            {tr("board.hideDeadX")}
             {hiddenDeadCount > 0 && (
               <span className="text-zinc-400">({hiddenDeadCount})</span>
             )}
           </label>
         </div>
-        <p className="mt-2 text-[11px] text-zinc-400">
-          支持粘贴合约地址（CA）查询热门榜外的自定义代币 · Enter /「查
-          CA」打开分析。币龄过滤创建时间；热度是近期交易窗口。
-        </p>
+        <p className="mt-2 text-[11px] text-zinc-400">{tr("board.hint")}</p>
         {chainErrors[chain] && (
           <p className="mt-1 text-xs text-rose-600">{chainErrors[chain]}</p>
         )}
         {error && <p className="mt-1 text-sm text-rose-600">{error}</p>}
         {customError && (
-          <p className="mt-1 text-xs text-rose-600">自定义代币：{customError}</p>
+          <p className="mt-1 text-xs text-rose-600">
+            {tr("board.customTitle")}: {customError}
+          </p>
         )}
       </div>
 
       <div className="mm-scroll min-h-0 flex-1 overflow-auto p-5">
         {loading && !hasData && (
-          <div className="mb-3 text-sm text-zinc-400">加载新币热门榜…</div>
+          <div className="mb-3 text-sm text-zinc-400">{tr("board.loading")}</div>
         )}
 
         {/* Custom CA result — always above hot table when present */}
@@ -490,11 +475,11 @@ export default function DashboardPage() {
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-emerald-100 bg-emerald-50/80 px-4 py-2.5">
               <div>
                 <p className="text-[12px] font-semibold text-emerald-900">
-                  自定义代币
-                  {customLoading ? " · 查询中…" : ""}
+                  {tr("board.customTitle")}
+                  {customLoading ? tr("board.customLoading") : ""}
                 </p>
                 <p className="text-[10px] text-emerald-800/70">
-                  不在热门榜也可用 CA 打开分析工作台
+                  {tr("board.customHint")}
                 </p>
               </div>
               {customToken && (
@@ -503,7 +488,7 @@ export default function DashboardPage() {
                   onClick={() => openToken(customToken)}
                   className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-600"
                 >
-                  打开分析 →
+                  {tr("board.openAnalyze")}
                 </Link>
               )}
             </div>
@@ -578,14 +563,14 @@ export default function DashboardPage() {
           <table className="w-full text-left text-sm">
             <thead className="sticky top-0 bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500">
               <tr>
-                <th className="px-4 py-3 font-medium">#</th>
-                <th className="px-4 py-3 font-medium">代币</th>
-                <th className="px-4 py-3 font-medium">币龄</th>
-                <th className="px-4 py-3 font-medium">MCap</th>
-                <th className="px-4 py-3 font-medium">Volume</th>
-                <th className="px-4 py-3 font-medium">涨跌</th>
-                <th className="px-4 py-3 font-medium">SM/KOL</th>
-                <th className="px-4 py-3 font-medium">社交</th>
+                <th className="px-4 py-3 font-medium">{tr("board.col.rank")}</th>
+                <th className="px-4 py-3 font-medium">{tr("board.col.token")}</th>
+                <th className="px-4 py-3 font-medium">{tr("board.col.age")}</th>
+                <th className="px-4 py-3 font-medium">{tr("board.col.mcap")}</th>
+                <th className="px-4 py-3 font-medium">{tr("board.col.vol")}</th>
+                <th className="px-4 py-3 font-medium">{tr("board.col.chg")}</th>
+                <th className="px-4 py-3 font-medium">{tr("board.col.sm")}</th>
+                <th className="px-4 py-3 font-medium">{tr("board.col.social")}</th>
                 <th className="px-4 py-3 font-medium"></th>
               </tr>
             </thead>
@@ -645,14 +630,14 @@ export default function DashboardPage() {
                           className="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] text-rose-600"
                           title={t.twitter_raw || "无效/已注销"}
                         >
-                          已注销
+                          {tr("board.deadX")}
                         </span>
                       ) : t.twitter_username ? (
                         <span className="text-sky-600">
                           @{t.twitter_username}
                         </span>
                       ) : (
-                        <span className="text-zinc-300">无 X</span>
+                        <span className="text-zinc-300">{tr("board.noX")}</span>
                       )}
                     </td>
                     <td className="px-4 py-3">
@@ -661,7 +646,7 @@ export default function DashboardPage() {
                         onClick={() => openToken(t)}
                         className="inline-flex rounded-lg bg-zinc-900 px-2.5 py-1 text-xs font-medium text-white hover:bg-zinc-800"
                       >
-                        分析
+                        {tr("board.analyze")}
                       </Link>
                     </td>
                   </tr>
@@ -674,16 +659,16 @@ export default function DashboardPage() {
                     className="px-4 py-16 text-center text-zinc-400"
                   >
                     {error
-                      ? "加载失败"
+                      ? tr("board.loadFail")
                       : looksLikeContractAddress(q)
                         ? customLoading
-                          ? "正在查询自定义 CA…"
+                          ? tr("board.emptyCaLoading")
                           : customToken
-                            ? "热门榜无此币 · 见上方「自定义代币」卡片"
+                            ? tr("board.emptyCaHit")
                             : customError
-                              ? "CA 查询失败，请确认链与地址"
-                              : "粘贴 CA 后将自动查询自定义代币"
-                        : "该条件下暂无新币，可放宽「币龄」、粘贴 CA 查自定义币，或点强制刷新"}
+                              ? tr("board.emptyCaFail")
+                              : tr("board.emptyCa")
+                        : tr("board.empty")}
                   </td>
                 </tr>
               )}
@@ -691,8 +676,9 @@ export default function DashboardPage() {
           </table>
         </div>
         <p className="mt-3 text-center text-[11px] text-[var(--text-muted)]">
-          币龄过滤走 GMGN max-created · 缓存 {Math.round(HOT_CACHE_TTL_MS / 60000)}{" "}
-          分钟 · 仅供研究教育
+          {tr("board.footer", {
+            min: Math.round(HOT_CACHE_TTL_MS / 60000),
+          })}
           {tokens[0] ? ` · ${shortAddr(tokens[0].address)}` : ""}
         </p>
       </div>

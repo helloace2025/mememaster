@@ -11,13 +11,15 @@ import {
 } from "@/components/AgentTerminal";
 import AgentProgressBar from "@/components/AgentProgressBar";
 import DevOverlayFilter from "@/components/DevOverlayFilter";
+import LangToggle from "@/components/LangToggle";
+import { useI18n } from "@/lib/i18n/I18nProvider";
 
 /**
- * App chrome: black header + agent log drawer + status pills.
- * Wallet connect removed — not needed for research MVP and MetaMask noise.
+ * App chrome: black header + agent log drawer + status pills + lang switch.
  */
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const { t } = useI18n();
   const [health, setHealth] = useState<Health | null>(null);
 
   useEffect(() => {
@@ -53,11 +55,16 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </div>
 
           <nav className="hidden items-center gap-0.5 sm:flex">
-            <TopLink href="/" active={isBoard || !!isToken} label="看板" />
-            <TopLink href="/chat" active={!!isChat} label="对话" />
+            <TopLink
+              href="/"
+              active={isBoard || !!isToken}
+              label={t("nav.board")}
+            />
+            <TopLink href="/chat" active={!!isChat} label={t("nav.chat")} />
           </nav>
 
           <div className="flex shrink-0 items-center gap-1.5">
+            <LangToggle />
             <Pill ok={!!health?.gmgn_key} label="GMGN" />
             <Pill ok={!!health?.opennews_token} label="6551" />
             <Pill ok={!!health?.llm_key} label="LLM" />
@@ -68,9 +75,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <AgentTerminalDrawer />
       </header>
 
-      <div className="flex h-8 shrink-0 items-center gap-1 border-b border-zinc-200 bg-white px-3 sm:hidden">
-        <TopLink href="/" active={isBoard || !!isToken} label="看板" light />
-        <TopLink href="/chat" active={!!isChat} label="对话" light />
+      <div className="flex h-8 shrink-0 items-center justify-between gap-1 border-b border-zinc-200 bg-white px-3 sm:hidden">
+        <div className="flex items-center gap-1">
+          <TopLink
+            href="/"
+            active={isBoard || !!isToken}
+            label={t("nav.board")}
+            light
+          />
+          <TopLink href="/chat" active={!!isChat} label={t("nav.chat")} light />
+        </div>
+        <LangToggle light />
       </div>
 
       <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">

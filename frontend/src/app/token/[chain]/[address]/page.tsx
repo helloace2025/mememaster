@@ -25,6 +25,7 @@ import {
   startAgentSession,
   tickAgentProgress,
 } from "@/lib/agentLog";
+import { useI18n } from "@/lib/i18n/I18nProvider";
 
 type ChatMsg = {
   id: string;
@@ -56,6 +57,7 @@ export default function TokenWorkspacePage() {
 }
 
 function WorkspaceInner() {
+  const { t, locale } = useI18n();
   const params = useParams<{ chain: string; address: string }>();
   const chain = params.chain;
   const address = params.address;
@@ -472,7 +474,7 @@ function WorkspaceInner() {
   if (!token) {
     return (
       <div className="flex h-full items-center justify-center text-zinc-400">
-        加载中…
+        {t("ws.loadingShort")}
       </div>
     );
   }
@@ -481,6 +483,10 @@ function WorkspaceInner() {
     token.twitter_status === "dead" || token.skip_research;
   const hasTwitter = !!(token.twitter_username && !deadSocial);
   const hasWebsite = !!token.website;
+  const langNote =
+    locale === "en"
+      ? "Reply in English. Research only. Learn structure, do not copy skin."
+      : "用中文回复。研究教育。学结构不抄皮。";
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-zinc-50">
@@ -490,7 +496,7 @@ function WorkspaceInner() {
           href="/"
           className="shrink-0 text-[11px] text-zinc-400 hover:text-zinc-700"
         >
-          看板
+          {t("ws.back")}
         </Link>
         <span className="text-zinc-300">/</span>
         {token.logo ? (
@@ -532,7 +538,9 @@ function WorkspaceInner() {
           disabled={loadingN || loadingO || loadingW}
           className="shrink-0 rounded-md bg-zinc-900 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-zinc-800 disabled:opacity-50"
         >
-          {loadingN || loadingO || loadingW ? "分析中" : "刷新"}
+          {loadingN || loadingO || loadingW
+            ? t("ws.refreshing")
+            : t("ws.refresh")}
         </button>
       </header>
 
@@ -548,15 +556,15 @@ function WorkspaceInner() {
           <div className="space-y-3 p-3">
             {deadSocial && (
               <div className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-2 text-[11px] text-rose-800">
-                X 已失效，无运营可学价值，建议回看板换币。
+                {t("ws.deadX")}
               </div>
             )}
 
             {/* key metrics only */}
             <div className="grid grid-cols-2 gap-1.5">
-              <Mini label="市值" value={fmtUsd(token.market_cap)} />
-              <Mini label="成交" value={fmtUsd(token.volume)} />
-              <Mini label="币龄" value={fmtAge(token.age_hours)} />
+              <Mini label={t("ws.mcap")} value={fmtUsd(token.market_cap)} />
+              <Mini label={t("ws.vol")} value={fmtUsd(token.volume)} />
+              <Mini label={t("ws.age")} value={fmtAge(token.age_hours)} />
               <Mini
                 label="24h"
                 value={fmtPct(token.price_change_percent)}
@@ -732,7 +740,7 @@ function WorkspaceInner() {
             ))}
             {chatBusy && (
               <p className="py-2 text-center text-[11px] tracking-wide text-zinc-400">
-                思考中…
+                {t("ws.thinking")}
               </p>
             )}
             <div ref={chatEnd} />
@@ -743,41 +751,41 @@ function WorkspaceInner() {
             onChange={setInput}
             busy={chatBusy}
             onStop={stopChat}
-            placeholder="问：他们怎么立项的？我怎么换皮做…"
+            placeholder={t("ws.chatPh")}
             primaryAction={{
-              label: "运营思路",
+              label: playbookBusy ? t("ws.playbookBusy") : t("ws.playbook"),
               onClick: () => void runPlaybook(),
               busy: playbookBusy,
             }}
             chips={[
               {
-                label: "同类延伸选题",
+                label: t("ws.chip.extend"),
                 prompt: [
-                  `以对标 $${token.symbol} 为案例（学结构不抄皮），给出 3–5 个**同类/延伸产品**方向。`,
-                  "每个方向：可学结构、必须换的皮、一句话立项、与原盘差异、风险。",
-                  "Markdown 分节；非投资建议。",
+                  locale === "en"
+                    ? `Using $${token.symbol} as a case study (learn structure, do not copy), propose 3–5 similar/extension product directions.`
+                    : `以对标 $${token.symbol} 为案例（学结构不抄皮），给出 3–5 个**同类/延伸产品**方向。`,
+                  locale === "en"
+                    ? "Each: portable structure · must-change skin · one-liner · difference · risks. Markdown."
+                    : "每个方向：可学结构、必须换的皮、一句话立项、与原盘差异、风险。Markdown 分节。",
+                  langNote,
                 ].join("\n"),
               },
               {
-                label: "可迁移结构",
+                label: t("ws.chip.structure"),
                 prompt: [
-                  `拆 $${token.symbol} 的可迁移结构（叙事/身份/视觉/节奏），列 checklist；`,
-                  "并写绝对不能抄的红线 + 我做同类盘的最小差异化 3 刀。学结构不抄皮。",
+                  locale === "en"
+                    ? `Extract portable structure from $${token.symbol} (narrative/identity/visual/cadence), checklist + red lines + 3 differentiators.`
+                    : `拆 $${token.symbol} 的可迁移结构（叙事/身份/视觉/节奏），列 checklist；红线 + 最小差异化 3 刀。`,
+                  langNote,
                 ].join("\n"),
               },
               {
-                label: "运营SOP（换皮版）",
+                label: t("ws.chip.sop"),
                 prompt: [
-                  `基于对标 ${token.symbol} 的盘面 + 中间推特/网站拆解，`,
-                  "生成**我自己的盘**可用运营 SOP（学结构不抄皮）。",
-                  "",
-                  "每个 ## 前后空一行；列表一项一行。",
-                  "## 0. 适用范围",
-                  "## 1. 立项 SOP",
-                  "## 2. 推特运营 SOP（日历用 Day 小节，勿宽表格）",
-                  "## 3. 网站 SOP",
-                  "## 4. 发射后 48h 清单 `- [ ]`",
-                  "## 5. 红线",
+                  locale === "en"
+                    ? `Based on $${token.symbol} board + Twitter/site ops, write an ops SOP for MY reskinned project. Day sections not wide tables.`
+                    : `基于对标 ${token.symbol} 的盘面 + 中间推特/网站拆解，生成**我自己的盘**运营 SOP。日历用 Day 小节，勿宽表格。`,
+                  langNote,
                 ].join("\n"),
               },
             ]}

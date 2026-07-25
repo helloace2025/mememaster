@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Script from "next/script";
 import "./globals.css";
 import AppShell from "@/components/AppShell";
+import { I18nProvider } from "@/lib/i18n/I18nProvider";
 
 export const metadata: Metadata = {
   title: "MemeMaster · 选题共创副驾驶",
@@ -22,7 +23,9 @@ export default function RootLayout({
           src="/suppress-ext-noise.js"
           strategy="beforeInteractive"
         />
-        <AppShell>{children}</AppShell>
+        <I18nProvider>
+          <AppShell>{children}</AppShell>
+        </I18nProvider>
       </body>
     </html>
   );

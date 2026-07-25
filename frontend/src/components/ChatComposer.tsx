@@ -9,6 +9,7 @@ import {
 } from "react";
 import type { LlmPrefs } from "@/lib/llmPrefs";
 import ModelConfigButton from "@/components/ModelConfigButton";
+import { useI18n } from "@/lib/i18n/I18nProvider";
 
 export type ChatAttachment = {
   id: string;
@@ -52,13 +53,14 @@ export default function ChatComposer({
   onSend,
   onStop,
   busy,
-  placeholder = "随时问我任何问题…",
+  placeholder,
   chips,
   onChip,
   primaryAction,
   llm,
   onLlmChange,
 }: Props) {
+  const { t } = useI18n();
   const fileRef = useRef<HTMLInputElement>(null);
   const [files, setFiles] = useState<ChatAttachment[]>([]);
 
@@ -211,7 +213,7 @@ export default function ChatComposer({
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={onKeyDown}
           rows={4}
-          placeholder={placeholder}
+          placeholder={placeholder || t("composer.placeholder")}
           disabled={busy}
           className="min-h-[104px] w-full resize-none bg-transparent px-3.5 pb-2 pt-3.5 text-[13.5px] leading-[1.7] text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-60"
         />
@@ -223,8 +225,8 @@ export default function ChatComposer({
               onClick={() => fileRef.current?.click()}
               disabled={busy}
               className="flex h-9 w-9 items-center justify-center text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 disabled:opacity-40"
-              title="添加文件"
-              aria-label="添加文件"
+              title={t("composer.attach")}
+              aria-label={t("composer.attach")}
             >
               <PaperclipIcon />
             </button>
@@ -238,8 +240,8 @@ export default function ChatComposer({
               type="button"
               onClick={() => onStop?.()}
               className="flex h-9 w-9 items-center justify-center rounded-full bg-zinc-900 text-white shadow-sm transition hover:bg-zinc-800"
-              title="停止生成"
-              aria-label="停止生成"
+              title={t("composer.stop")}
+              aria-label={t("composer.stop")}
             >
               <StopSquareIcon />
             </button>
@@ -252,8 +254,8 @@ export default function ChatComposer({
                   ? "bg-zinc-900 text-white hover:bg-zinc-800"
                   : "bg-zinc-100 text-zinc-300"
               }`}
-              title="发送"
-              aria-label="发送"
+              title={t("composer.send")}
+              aria-label={t("composer.send")}
             >
               <SendArrowIcon />
             </button>
@@ -262,9 +264,7 @@ export default function ChatComposer({
       </form>
 
       <p className="mt-1.5 text-center text-[10px] text-zinc-400">
-        {busy
-          ? "生成中 · 点圆形停止按钮可打断"
-          : "Enter 发送 · Shift+Enter 换行 · 支持 txt / md / json / csv / 图片"}
+        {busy ? t("composer.hintBusy") : t("composer.hint")}
       </p>
     </div>
   );

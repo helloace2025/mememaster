@@ -1,10 +1,10 @@
 "use client";
 
 import RichText from "@/components/RichText";
+import { useI18n } from "@/lib/i18n/I18nProvider";
 
 /**
- * Middle column: two independent blocks — 推特运营 / 网站运营.
- * Block layout only (no flex-shrink stack) so content never paints over the next section.
+ * Middle column: two independent blocks — Twitter ops / website ops.
  */
 export default function GuideDimensions({
   opsText,
@@ -29,41 +29,39 @@ export default function GuideDimensions({
   hasWebsite?: boolean;
   hasTwitter?: boolean;
 }) {
+  const { t } = useI18n();
   return (
     <div className="block bg-white">
       <OpsSection
         kind="twitter"
-        title="推特运营"
-        subtitle="立项路径：切入 → 立概念 → 推项目 · 含配图/视觉线索"
+        title={t("ops.twitter")}
+        subtitle={t("ops.twitterSub")}
         meta={opsMeta}
         loading={loadingOps}
         empty={
-          !hasTwitter
-            ? "无有效 X 账号，跳过推特运营拆解"
-            : "暂无推文分析"
+          !hasTwitter ? t("ops.twitterEmptyNo") : t("ops.twitterEmpty")
         }
         content={opsText}
         onRefresh={hasTwitter ? onRefreshOps : undefined}
-        loadingLabel="抓取推文并还原立项路径…"
+        loadingLabel={t("ops.twitterLoading")}
+        reanalyzeLabel={t("ops.reanalyze")}
+        analyzingLabel={t("ops.analyzing")}
       />
 
-      {/* hard separator between the two blocks */}
       <div className="h-3 border-y border-zinc-200 bg-zinc-100" aria-hidden />
 
       <OpsSection
         kind="website"
-        title="网站运营"
-        subtitle="落地页：信息架构 · 设计 · 功能 · 技术栈线索"
+        title={t("ops.web")}
+        subtitle={t("ops.webSub")}
         meta={websiteMeta}
         loading={loadingWebsite}
-        empty={
-          !hasWebsite
-            ? "未绑定官网，跳过网站分析（可在右侧对话里讨论要不要做站）"
-            : "暂无网站分析"
-        }
+        empty={!hasWebsite ? t("ops.webEmptyNo") : t("ops.webEmpty")}
         content={websiteText || ""}
         onRefresh={hasWebsite ? onRefreshWebsite : undefined}
-        loadingLabel="打开官网并拆解落地页…"
+        loadingLabel={t("ops.webLoading")}
+        reanalyzeLabel={t("ops.reanalyze")}
+        analyzingLabel={t("ops.analyzing")}
       />
     </div>
   );
@@ -79,6 +77,8 @@ function OpsSection({
   content,
   onRefresh,
   loadingLabel,
+  reanalyzeLabel,
+  analyzingLabel,
 }: {
   kind: "twitter" | "website";
   title: string;
@@ -89,6 +89,8 @@ function OpsSection({
   content: string;
   onRefresh?: () => void;
   loadingLabel: string;
+  reanalyzeLabel: string;
+  analyzingLabel: string;
 }) {
   const accent =
     kind === "twitter"
@@ -128,7 +130,7 @@ function OpsSection({
             onClick={onRefresh}
             disabled={loading}
           >
-            {loading ? "分析中…" : "重新分析"}
+            {loading ? analyzingLabel : reanalyzeLabel}
           </button>
         )}
       </div>
