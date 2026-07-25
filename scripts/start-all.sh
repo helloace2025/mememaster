@@ -4,6 +4,23 @@ set -eu
 API_PORT="${API_PORT:-8001}"
 PORT="${PORT:-3000}"
 
+# Seed gmgn-cli config from Railway env (CLI also reads process env)
+if [ -n "${GMGN_API_KEY:-}" ]; then
+  mkdir -p /root/.config/gmgn
+  # shellcheck disable=SC2016
+  printf 'GMGN_API_KEY=%s\n' "$GMGN_API_KEY" > /root/.config/gmgn/.env
+  chmod 600 /root/.config/gmgn/.env || true
+  echo "[mememaster] GMGN_API_KEY present (len=${#GMGN_API_KEY})"
+else
+  echo "[mememaster] WARN: GMGN_API_KEY not set — hot board will be empty" >&2
+fi
+
+if command -v gmgn-cli >/dev/null 2>&1; then
+  echo "[mememaster] gmgn-cli: $(gmgn-cli --version 2>/dev/null || echo present)"
+else
+  echo "[mememaster] WARN: gmgn-cli not on PATH — using Python HTTP fallback" >&2
+fi
+
 echo "[mememaster] starting API on 127.0.0.1:${API_PORT}"
 cd /app/api
 uvicorn app.main:app --host 127.0.0.1 --port "${API_PORT}" &

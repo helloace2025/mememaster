@@ -53,6 +53,15 @@ Only if you want them split.
 | Symptom | Cause |
 |---------|--------|
 | Domain opens blank / 404 JSON | Still running **API-only** image — redeploy latest unified Dockerfile |
-| Hot list empty | Missing `GMGN_API_KEY` |
+| Hot list empty (`/api/hot` count=0) | See below |
 | LLM not working | Missing LLM API keys (`DEEPSEEK_API_KEY` etc.) |
 | Build timeout | Free tier memory; retry or upgrade |
+
+### Hot list empty but `/api/health` shows `gmgn_key: true`
+
+1. Redeploy **latest** image (includes `gmgn-cli` + IPv4 fix).  
+2. Check health has **`gmgn_cli: true`** (CLI installed in container).  
+3. Confirm Railway variable name is exactly **`GMGN_API_KEY`** (not a custom name).  
+4. Start logs should show: `GMGN_API_KEY present` and `gmgn-cli: …`.  
+5. Probe: `/api/hot?chains=sol&limit=5&max_created=all` — should return tokens.  
+6. GMGN OpenAPI needs **IPv4**; the image forces IPv4 (same as official `gmgn-cli`).

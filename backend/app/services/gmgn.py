@@ -1,13 +1,15 @@
 """GMGN data client.
 
-Primary path: `gmgn-cli` (survives Cloudflare better than raw Python HTTP).
-Fallback: OpenAPI exist-auth via httpx.
+Primary path: `gmgn-cli` (forces IPv4 + same auth stack as skills).
+Fallback: OpenAPI exist-auth via httpx (also IPv4-bound).
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import os
 import shutil
 import time
 import uuid
@@ -17,6 +19,8 @@ import httpx
 
 from app.config import Settings
 
+log = logging.getLogger("mememaster.gmgn")
+
 
 class GmgnError(Exception):
     def __init__(self, message: str, status: int | None = None, body: Any = None):
@@ -25,10 +29,19 @@ class GmgnError(Exception):
         self.body = body
 
 
+def _ipv4_transport() -> httpx.AsyncHTTPTransport:
+    """Bind local side to 0.0.0.0 so connections use IPv4.
+
+    gmgn-cli does the same (undici family: 4). IPv6 to openapi.gmgn.ai
+    often fails or returns empty/blocked payloads on cloud hosts.
+    """
+    return httpx.AsyncHTTPTransport(local_address="0.0.0.0")
+
+
 class GmgnClient:
     def __init__(self, settings: Settings):
         self.base = settings.gmgn_openapi_base.rstrip("/")
-        self.api_key = settings.gmgn_api_key
+        self.api_key = (settings.gmgn_api_key or os.environ.get("GMGN_API_KEY") or "").strip()
         self.cli = shutil.which("gmgn-cli")
         if not self.api_key and not self.cli:
             raise GmgnError("GMGN_API_KEY is not set and gmgn-cli not found")
@@ -55,9 +68,24 @@ class GmgnClient:
             raise GmgnError("GMGN_API_KEY is not set")
         url = f"{self.base}{path}"
         query = self._auth_params(params)
-        async with httpx.AsyncClient(timeout=45.0) as client:
-            res = await client.get(url, headers=self._headers(), params=query)
-        return self._parse(res, path)
+        # Fresh timestamp/client_id per attempt; retry once on transient empty/CF
+        last_err: Exception | None = None
+        for attempt in range(2):
+            try:
+                async with httpx.AsyncClient(
+                    timeout=httpx.Timeout(45.0, connect=20.0),
+                    transport=_ipv4_transport(),
+                    follow_redirects=True,
+                ) as client:
+                    res = await client.get(url, headers=self._headers(), params=query)
+                return self._parse(res, path)
+            except (httpx.TransportError, httpx.TimeoutException) as e:
+                last_err = e
+                log.warning("GMGN %s transport error attempt=%s: %s", path, attempt + 1, e)
+                # rebuild auth params for retry (timestamp window is ±5s)
+                query = self._auth_params(params)
+                await asyncio.sleep(0.4)
+        raise GmgnError(f"GMGN {path} network failed: {last_err}") from last_err
 
     def _parse(self, res: httpx.Response, path: str) -> Any:
         try:
@@ -93,24 +121,33 @@ class GmgnClient:
         max_created: only tokens younger than this, e.g. ``7d`` / ``24h`` / ``3d``.
         Filters old bluechips out so the board surfaces new narratives.
         """
-        # Prefer CLI — same auth stack as skills, fewer CF blocks
+        chain = (chain or "sol").strip().lower()
+        # Prefer CLI — IPv4 + same stack as skills
         if self.cli:
             try:
-                return await self._trending_via_cli(
+                out = await self._trending_via_cli(
                     chain, interval, limit, order_by, max_created
                 )
+                if out:
+                    return out
+                log.warning(
+                    "gmgn-cli rank empty chain=%s interval=%s max_created=%s — trying HTTP",
+                    chain,
+                    interval,
+                    max_created,
+                )
             except Exception as cli_err:
-                # fall through to HTTP if key present
+                log.warning("gmgn-cli trending failed: %s", cli_err)
                 if not self.api_key:
                     raise GmgnError(f"gmgn-cli failed: {cli_err}") from cli_err
-                http_err: Exception | None = None
                 try:
                     return await self._trending_via_http(
                         chain, interval, limit, order_by, max_created
                     )
-                except Exception as e:
-                    http_err = e
-                raise GmgnError(f"cli failed ({cli_err}); http failed ({http_err})") from http_err
+                except Exception as http_err:
+                    raise GmgnError(
+                        f"cli failed ({cli_err}); http failed ({http_err})"
+                    ) from http_err
 
         return await self._trending_via_http(
             chain, interval, limit, order_by, max_created
@@ -124,6 +161,8 @@ class GmgnClient:
         order_by: str,
         max_created: str | None = None,
     ) -> list[dict[str, Any]]:
+        # Over-fetch when age-filtering client-side is a backup for CLI server filter
+        fetch_limit = min(100, max(limit, limit * 3 if max_created else limit))
         cmd = [
             self.cli or "gmgn-cli",
             "market",
@@ -133,7 +172,7 @@ class GmgnClient:
             "--interval",
             interval,
             "--limit",
-            str(limit),
+            str(fetch_limit),
             "--order-by",
             order_by,
             "--raw",
@@ -144,12 +183,16 @@ class GmgnClient:
         def run() -> str:
             import subprocess
 
+            env = os.environ.copy()
+            if self.api_key:
+                env["GMGN_API_KEY"] = self.api_key
             proc = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
                 timeout=90,
                 shell=False,
+                env=env,
             )
             if proc.returncode != 0:
                 raise GmgnError(
@@ -163,7 +206,19 @@ class GmgnClient:
         # CLI may print non-json lines; take last JSON-looking line
         line = out.splitlines()[-1]
         raw = json.loads(line)
-        return self._extract_rank(raw, chain, limit, max_created=max_created)
+        items = self._extract_rank(raw, chain, limit, max_created=max_created)
+        # If server ignored max_created and client filter wiped the list, retry without age filter
+        if not items and max_created:
+            raw_n = self._rank_len(raw)
+            if raw_n > 0:
+                log.warning(
+                    "cli rank filtered to 0 (raw=%s) chain=%s max_created=%s — relaxing age filter",
+                    raw_n,
+                    chain,
+                    max_created,
+                )
+                items = self._extract_rank(raw, chain, limit, max_created=None)
+        return items
 
     async def _trending_via_http(
         self,
@@ -173,17 +228,68 @@ class GmgnClient:
         order_by: str,
         max_created: str | None = None,
     ) -> list[dict[str, Any]]:
-        params: dict[str, Any] = {
-            "chain": chain,
-            "interval": interval,
-            "limit": limit,
-            "order_by": order_by,
-        }
-        # openapi rank may accept max_created in query (same as CLI filter service)
-        if max_created:
-            params["max_created"] = max_created
-        raw = await self.get("/v1/market/rank", params)
-        return self._extract_rank(raw, chain, limit, max_created=max_created)
+        # Over-fetch so client-side age filter still yields `limit` rows
+        fetch_limit = min(100, max(limit * 5, 50) if max_created else limit)
+
+        async def _once(
+            *,
+            use_max: bool,
+            use_order: bool,
+            lim: int,
+        ) -> list[dict[str, Any]]:
+            params: dict[str, Any] = {
+                "chain": chain,
+                "interval": interval,
+                "limit": lim,
+            }
+            if use_order and order_by:
+                params["order_by"] = order_by
+            # openapi-service evaluates max_created itself (m/h/d duration strings)
+            if use_max and max_created:
+                params["max_created"] = max_created
+            raw = await self.get("/v1/market/rank", params)
+            raw_n = self._rank_len(raw)
+            items = self._extract_rank(
+                raw,
+                chain,
+                limit,
+                # if upstream already applied max_created, still re-apply as safety net
+                max_created=max_created if use_max else None,
+            )
+            if not items and raw_n > 0 and max_created:
+                # upstream ignored max_created; client filter wiped bluechips → relax
+                items = self._extract_rank(raw, chain, limit, max_created=None)
+            if not items:
+                log.warning(
+                    "HTTP rank empty chain=%s raw_n=%s keys=%s params=%s",
+                    chain,
+                    raw_n,
+                    list(raw.keys()) if isinstance(raw, dict) else type(raw).__name__,
+                    {k: v for k, v in params.items() if k not in ("timestamp", "client_id")},
+                )
+            return items
+
+        # Attempt ladder: normal → no age → no order_by → bare minimum
+        attempts = [
+            {"use_max": True, "use_order": True, "lim": fetch_limit},
+            {"use_max": False, "use_order": True, "lim": fetch_limit},
+            {"use_max": False, "use_order": False, "lim": min(100, fetch_limit)},
+        ]
+        last: list[dict[str, Any]] = []
+        for kwargs in attempts:
+            # skip max-created attempts when none requested
+            if kwargs["use_max"] and not max_created:
+                continue
+            try:
+                last = await _once(**kwargs)
+            except Exception as e:
+                log.warning("HTTP rank attempt failed %s: %s", kwargs, e)
+                continue
+            if last:
+                return last
+            # brief pause between attempts (rate-limit / auth clock)
+            await asyncio.sleep(0.35)
+        return last
 
     async def token_info(self, chain: str, address: str) -> dict[str, Any]:
         """Fetch single token metadata + realtime price (GMGN token info)."""
@@ -220,12 +326,16 @@ class GmgnClient:
         def run() -> str:
             import subprocess
 
+            env = os.environ.copy()
+            if self.api_key:
+                env["GMGN_API_KEY"] = self.api_key
             proc = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
                 timeout=60,
                 shell=False,
+                env=env,
             )
             if proc.returncode != 0:
                 raise GmgnError(
@@ -249,6 +359,42 @@ class GmgnClient:
         )
         return flatten_token_info(raw, chain, address)
 
+    @staticmethod
+    def _rank_list(raw: Any) -> list[Any]:
+        """Pull rank array from heterogeneous OpenAPI envelopes."""
+        if raw is None:
+            return []
+        if isinstance(raw, list):
+            return raw
+        if not isinstance(raw, dict):
+            return []
+        data = raw.get("data", raw)
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            for key in ("rank", "list", "tokens", "items", "rows"):
+                v = data.get(key)
+                if isinstance(v, list):
+                    return v
+            # some payloads nest once more
+            inner = data.get("data")
+            if isinstance(inner, list):
+                return inner
+            if isinstance(inner, dict):
+                for key in ("rank", "list", "tokens"):
+                    v = inner.get(key)
+                    if isinstance(v, list):
+                        return v
+        # top-level fallbacks
+        for key in ("rank", "list", "tokens"):
+            v = raw.get(key)
+            if isinstance(v, list):
+                return v
+        return []
+
+    def _rank_len(self, raw: Any) -> int:
+        return len(self._rank_list(raw))
+
     def _extract_rank(
         self,
         raw: Any,
@@ -256,13 +402,7 @@ class GmgnClient:
         limit: int,
         max_created: str | None = None,
     ) -> list[dict[str, Any]]:
-        data = raw.get("data", raw) if isinstance(raw, dict) else raw
-        if isinstance(data, dict):
-            rank = data.get("rank") or data.get("list") or []
-        elif isinstance(data, list):
-            rank = data
-        else:
-            rank = []
+        rank = self._rank_list(raw)
         max_age_sec = parse_duration_seconds(max_created) if max_created else None
         now = time.time()
         out: list[dict[str, Any]] = []
@@ -272,14 +412,19 @@ class GmgnClient:
             item = dict(item)
             # client-side age filter as backup if upstream ignored max_created
             if max_age_sec is not None:
-                created = item.get("creation_timestamp") or item.get("open_timestamp")
+                created = (
+                    item.get("creation_timestamp")
+                    or item.get("open_timestamp")
+                    or item.get("created_timestamp")
+                )
                 try:
                     created_f = float(created) if created is not None else None
                 except (TypeError, ValueError):
                     created_f = None
-                if created_f and created_f > 1e12:  # ms
+                if created_f is not None and created_f > 1e12:  # ms
                     created_f = created_f / 1000.0
-                if created_f and (now - created_f) > max_age_sec:
+                # Missing timestamp: keep row (don't discard whole board)
+                if created_f is not None and created_f > 0 and (now - created_f) > max_age_sec:
                     continue
             item.setdefault("chain", chain)
             item["rank"] = len(out) + 1

@@ -40,7 +40,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       python3 python3-pip python3-venv curl ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && python3 -m venv /opt/venv \
-    && pip install --no-cache-dir -U pip
+    && pip install --no-cache-dir -U pip \
+    && npm install -g gmgn-cli@1.5.2 \
+    && gmgn-cli --version
 
 COPY backend/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt \

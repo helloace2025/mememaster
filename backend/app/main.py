@@ -124,11 +124,16 @@ async def root() -> dict[str, Any]:
 
 @app.get("/api/health")
 async def health() -> dict[str, Any]:
+    import shutil
+
     active = resolve_llm(settings)
     providers = provider_status(settings)
+    gmgn_cli_path = shutil.which("gmgn-cli")
     return {
         "ok": True,
         "gmgn_key": bool(settings.gmgn_api_key),
+        "gmgn_cli": bool(gmgn_cli_path),
+        "gmgn_cli_path": gmgn_cli_path,
         "opennews_token": bool(settings.opennews_token),
         "llm_key": bool(active),
         "llm_provider": settings.llm_provider,
@@ -145,6 +150,7 @@ async def health() -> dict[str, Any]:
         "llm_providers": providers,
         "chains": settings.chains,
         "interval": settings.hot_interval,
+        "hot_max_created": settings.hot_max_created,
         "disclaimer": "仅供研究与教育，非投资建议",
     }
 
@@ -274,7 +280,18 @@ async def hot_tokens(
                 max_created=age_filter,
             )
             tokens = [normalize_token(x, chain) for x in rank]
-            return {"chain": chain, "ok": True, "count": len(tokens), "tokens": tokens}
+            block: dict[str, Any] = {
+                "chain": chain,
+                "ok": True,
+                "count": len(tokens),
+                "tokens": tokens,
+            }
+            if not tokens:
+                block["hint"] = (
+                    "rank empty after fetch — check GMGN_API_KEY / gmgn-cli / IPv4 "
+                    "and Railway logs for mememaster.gmgn warnings"
+                )
+            return block
         except Exception as e:
             return {"chain": chain, "ok": False, "error": str(e), "count": 0, "tokens": []}
 
