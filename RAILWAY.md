@@ -27,7 +27,7 @@ Root `Dockerfile` runs:
 | `DEEPSEEK_API_KEY` | or other LLM key |
 | `LLM_PROVIDER` | `auto` |
 | `CORS_ORIGINS` | `*` or your Railway domain |
-| `OPENNEWS_TOKEN` | optional (Twitter ops) |
+| `OPENNEWS_TOKEN` | required for 推文/运营拆解（6551，[领取](http://app.newsliquid.com/mcp)） |
 
 4. Redeploy → open `https://your-app.up.railway.app/` — you should see the **看板 UI**, not a blank 404.
 
@@ -65,3 +65,12 @@ Only if you want them split.
 4. Start logs should show: `GMGN_API_KEY present` and `gmgn-cli: …`.  
 5. Probe: `/api/hot?chains=sol&limit=5&max_created=all` — should return tokens.  
 6. GMGN OpenAPI needs **IPv4**; the image forces IPv4 (same as official `gmgn-cli`).
+
+### 推文抓不到
+
+**不要**在 Railway 容器里 `npx skills add opentwitter`。  
+`opentwitter` skill 只给本机 AI Agent 用；线上 MemeMaster 已内置同等 REST 调用（`POST https://ai.6551.io/open/twitter_*`）。
+
+1. Railway 变量 **`OPENNEWS_TOKEN`** 已配置（`/api/health` → `opennews_token: true`）  
+2. 代币必须有真实 `@handle`（Community 链接 / status 链接会标 dead 并跳过）  
+3. 自测：`POST /api/twitter/ops` body `{"username":"elonmusk","max_tweets":3}` 应返回 `tweet_count > 0`

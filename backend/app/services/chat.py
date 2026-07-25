@@ -397,16 +397,44 @@ async def analyze_twitter_ops(
         "没有写在推文里的内容不要编造：\n"
         + json.dumps(user_payload, ensure_ascii=False, default=str)[:24000]
     )
-    content, resolved = await chat_text(
-        settings,
-        OPS_SYSTEM,
-        prompt,
-        provider=provider,
-        model=model,
-        api_key=api_key,
-        base_url=base_url,
-        temperature=0.4,
-    )
+    try:
+        content, resolved = await chat_text(
+            settings,
+            OPS_SYSTEM,
+            prompt,
+            provider=provider,
+            model=model,
+            api_key=api_key,
+            base_url=base_url,
+            temperature=0.4,
+        )
+    except Exception as llm_err:
+        # Tweets were fetched successfully — never 500 the whole ops panel
+        # just because the model timed out / errored.
+        lines = [
+            f"## @{username} 推文已抓到（{len(tweets_compact)} 条），但模型分析失败",
+            f"原因：{llm_err}",
+            "",
+            "### 最近推文摘要",
+        ]
+        for i, t in enumerate(tweets_compact[:12], 1):
+            text = str((t or {}).get("text") or "")[:220]
+            tm = str((t or {}).get("time") or "")
+            lines.append(f"{i}. [{tm}] {text}")
+        return {
+            "ok": True,
+            "username": username,
+            "profile": bundle.get("profile"),
+            "tweets": tweets_compact,
+            "tweet_count": bundle.get("tweet_count"),
+            "content": "\n".join(lines),
+            "provider": None,
+            "model": None,
+            "source": "twitter_ops_partial",
+            "fetch_notes": notes + [f"llm_error: {llm_err}"],
+            "error_code": "llm_failed_after_fetch",
+        }
+
     # soft prefix if we had to use fallback strategy
     if notes and any("备用" in n or "降级" in n for n in notes):
         content = f"（数据拉取备注：{notes[-1]}）\n\n" + content

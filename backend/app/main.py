@@ -469,20 +469,40 @@ async def chat_endpoint(body: ChatBody) -> dict[str, Any]:
 
 @app.post("/api/twitter/ops")
 async def twitter_ops_endpoint(body: TwitterOpsBody) -> dict[str, Any]:
-    """Fetch tweets via 6551 and analyze social ops style."""
-    username = (body.username or "").strip().lstrip("@")
+    """Fetch tweets via 6551 OpenNews REST (same as opentwitter skill) + ops analysis."""
+    from app.services.gmgn import clean_twitter_username
+
+    username = (body.username or "").strip()
+    # Prefer explicit username, then token fields (may be full x.com URL from GMGN)
     if not username and body.token:
-        username = str(
-            body.token.get("twitter_username")
-            or body.token.get("twitter")
-            or ""
-        ).strip().lstrip("@")
-        # website sometimes is x.com/foo
+        for key in ("twitter_username", "twitter", "twitter_raw"):
+            raw = body.token.get(key)
+            if raw:
+                cleaned, st = clean_twitter_username(raw)
+                if cleaned and st == "ok":
+                    username = cleaned
+                    break
         if not username:
             site = str(body.token.get("website") or "")
-            m = re.search(r"(?:x|twitter)\.com/([A-Za-z0-9_]+)", site, re.I)
-            if m:
-                username = m.group(1)
+            cleaned, st = clean_twitter_username(site)
+            if cleaned and st == "ok":
+                username = cleaned
+
+    if username:
+        cleaned, st = clean_twitter_username(username)
+        if st in ("dead", "community", "missing") or not cleaned:
+            return {
+                "ok": False,
+                "username": username,
+                "content": (
+                    f"X 链接无效或为 Community/已删除账号（status={st}），无法抓推文。"
+                    " 请换有真实 @handle 的代币。"
+                ),
+                "source": "twitter_bad_handle",
+                "error_code": st or "bad_handle",
+                "disclaimer": "仅供研究与教育，非投资建议",
+            }
+        username = cleaned
 
     if not username:
         raise HTTPException(
@@ -490,7 +510,10 @@ async def twitter_ops_endpoint(body: TwitterOpsBody) -> dict[str, Any]:
             detail="需要 twitter username：请传 username，或 token.twitter_username",
         )
     if not settings.opennews_token:
-        raise HTTPException(status_code=400, detail="OPENNEWS_TOKEN is not set")
+        raise HTTPException(
+            status_code=400,
+            detail="OPENNEWS_TOKEN is not set（Railway 变量名需为 OPENNEWS_TOKEN）",
+        )
 
     try:
         result = await analyze_twitter_ops(
@@ -516,7 +539,17 @@ async def twitter_ops_endpoint(body: TwitterOpsBody) -> dict[str, Any]:
             "disclaimer": "仅供研究与教育，非投资建议",
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        # Never hard-500 the ops panel — UI expects soft copy
+        return {
+            "ok": False,
+            "username": username,
+            "content": _twitter_fetch_failed_message(
+                username, notes=[f"服务异常: {e}"]
+            ),
+            "source": "twitter_error",
+            "error_code": "server_error",
+            "disclaimer": "仅供研究与教育，非投资建议",
+        }
 
     return {**result, "disclaimer": "仅供研究与教育，非投资建议"}
 

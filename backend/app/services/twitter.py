@@ -1,4 +1,9 @@
-"""6551 OpenNews Twitter REST client — resilient fetches."""
+"""6551 OpenNews Twitter REST client — resilient fetches.
+
+Uses the same HTTP endpoints documented by the opentwitter skill
+(POST https://ai.6551.io/open/twitter_*), with OPENNEWS_TOKEN Bearer auth.
+No MCP/skill runtime is required inside the Railway container.
+"""
 
 from __future__ import annotations
 
@@ -20,6 +25,11 @@ class TwitterError(Exception):
         self.status = status
 
 
+def _ipv4_transport() -> httpx.AsyncHTTPTransport:
+    # Match gmgn path: force IPv4 on cloud hosts where IPv6 is flaky
+    return httpx.AsyncHTTPTransport(local_address="0.0.0.0")
+
+
 class TwitterClient:
     def __init__(self, settings: Settings):
         self.base = settings.opennews_api_base.rstrip("/")
@@ -32,6 +42,7 @@ class TwitterClient:
             "Authorization": f"Bearer {self.token}",
             "Content-Type": "application/json",
             "Accept": "application/json",
+            "User-Agent": "mememaster/1.0 (opentwitter-compat)",
         }
 
     async def post(
@@ -48,7 +59,11 @@ class TwitterClient:
 
         for attempt in range(retries + 1):
             try:
-                async with httpx.AsyncClient(timeout=timeout) as client:
+                async with httpx.AsyncClient(
+                    timeout=httpx.Timeout(timeout, connect=15.0),
+                    transport=_ipv4_transport(),
+                    follow_redirects=True,
+                ) as client:
                     res = await client.post(url, headers=self._headers(), json=body)
 
                 try:

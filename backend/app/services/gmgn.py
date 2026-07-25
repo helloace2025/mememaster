@@ -462,17 +462,45 @@ def clean_twitter_username(raw: Any) -> tuple[str, str]:
       - ok: usable @handle
       - missing: no twitter linked
       - dead: deleted / numeric snowflake / garbage — no research value
+      - community: X Community link only (no personal handle)
     """
+    import re as _re
+
     if raw is None:
         return "", "missing"
     s = str(raw).strip()
     if not s or s.lower() in ("null", "none", "undefined", "-", "n/a"):
         return "", "missing"
-    if s.startswith("http"):
-        s = s.rstrip("/").split("/")[-1]
-        # x.com/i/user/123456 → numeric id path
-        if s.isdigit():
+
+    # Full URL forms from GMGN rank items
+    #   https://x.com/foo
+    #   https://x.com/foo/status/123
+    #   https://twitter.com/i/user/123
+    #   https://x.com/i/communities/123
+    if "://" in s or s.lower().startswith(("x.com/", "twitter.com/", "www.")):
+        low = s.lower()
+        if "/i/communities/" in low or "/communities/" in low:
+            return "", "community"
+        if "/i/user/" in low or "/i/lists/" in low:
             return "", "dead"
+        # /status/ID → take handle before /status/
+        m = _re.search(
+            r"(?:x\.com|twitter\.com)/@?([A-Za-z0-9_]{1,20})(?:/status/|/i/|/with_replies|/media|/likes)?",
+            s,
+            _re.I,
+        )
+        if m:
+            handle = m.group(1)
+            if handle.lower() in ("i", "intent", "share", "search", "home", "explore", "settings"):
+                return "", "dead"
+            s = handle
+        else:
+            # fallback: last path segment
+            path = s.split("?", 1)[0].rstrip("/")
+            s = path.split("/")[-1]
+            if s.isdigit():
+                return "", "dead"
+
     s = s.lstrip("@").strip()
     if not s:
         return "", "missing"
@@ -483,11 +511,8 @@ def clean_twitter_username(raw: Any) -> tuple[str, str]:
     digits = sum(ch.isdigit() for ch in s)
     if len(s) >= 10 and digits / max(len(s), 1) >= 0.85:
         return "", "dead"
-    # Twitter/X handle: 1–15 letters/numbers/underscore
-    import re as _re
-
-    if not _re.fullmatch(r"[A-Za-z0-9_]{1,15}", s):
-        # still allow slightly longer legacy, but reject obvious garbage
+    # Twitter/X handle: 1–15 letters/numbers/underscore (allow up to 20 legacy)
+    if not _re.fullmatch(r"[A-Za-z0-9_]{1,20}", s):
         if len(s) > 20 or _re.search(r"[^\w]", s):
             return "", "dead"
     return s, "ok"
