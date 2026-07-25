@@ -179,7 +179,7 @@ function WorkspaceInner() {
         return;
       }
       setLoadingO(true);
-      agentLog("twitter", `6551 抓取 @${t.twitter_username} 推文…`, "run");
+      agentLog("social", `抓取 @${t.twitter_username} 推文…`, "run");
       try {
         const res = await twitterOps({
           token: t,
@@ -678,7 +678,7 @@ function WorkspaceInner() {
                 rel="noreferrer"
                 className="text-zinc-500 hover:underline"
               >
-                在 GMGN 打开
+                {t("ws.openChart")}
               </a>
             </div>
           </div>

@@ -105,12 +105,12 @@ export default function DashboardPage() {
         1
       );
       agentLog(
-        "gmgn",
+        "market",
         `拉取热门 · interval=${interval} · age=${maxCreated} · limit=${limit}`,
         "run"
       );
       agentLog(
-        "gmgn",
+        "market",
         `chains: ${ALL_CHAIN_IDS.join(", ")}`,
         "info"
       );
@@ -266,13 +266,13 @@ export default function DashboardPage() {
         setCustomToken(t);
         if (res.probed && res.chain !== chain) {
           agentLog(
-            "gmgn",
+            "market",
             `在 ${res.chain} 命中（当前 Tab 为 ${chain}）`,
             "warn"
           );
         } else {
           agentLog(
-            "gmgn",
+            "market",
             `命中 ${t.symbol || shortAddr(t.address)}`,
             "ok"
           );
