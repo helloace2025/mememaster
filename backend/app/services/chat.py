@@ -312,14 +312,16 @@ async def fetch_twitter_bundle(
         profile_error = str(e)
 
     tweets, fetch_notes = await tw.user_tweets_resilient(username, max_results=max_tweets)
+    tweets_compact = compact_tweets(tweets, max_tweets)
 
     return {
         "username": username,
         "profile": profile,
         "profile_error": profile_error,
         "tweets": tweets,
-        "tweets_compact": compact_tweets(tweets, max_tweets),
-        "tweet_count": len(tweets),
+        "tweets_compact": tweets_compact,
+        # count compact (what LLM / UI actually sees)
+        "tweet_count": len(tweets_compact),
         "fetch_notes": fetch_notes,
     }
 

@@ -163,18 +163,105 @@ class TwitterClient:
         )
         return self._extract_tweet_list(data)
 
+    async def search_from_user(
+        self,
+        username: str,
+        max_results: int = 20,
+        *,
+        product: str = "Latest",
+    ) -> list[dict[str, Any]]:
+        """twitter_search fromUser — often richer than twitter_user_tweets.
+
+        6551's /open/twitter_user_tweets frequently returns only 1 (pinned/featured)
+        post for brand accounts, while search returns a real timeline.
+        """
+        username = username.lstrip("@").strip()
+        if not username:
+            return []
+        data = await self.post(
+            "/open/twitter_search",
+            {
+                "fromUser": username,
+                "maxResults": max_results,
+                "product": product,
+            },
+            retries=1,
+        )
+        items = self._extract_tweet_list(data)
+        # keep only posts authored by this handle (search can occasionally mix)
+        uname = username.lower()
+        filtered: list[dict[str, Any]] = []
+        for t in items:
+            if not isinstance(t, dict):
+                continue
+            author = str(
+                t.get("userScreenName")
+                or t.get("screen_name")
+                or t.get("username")
+                or t.get("user_name")
+                or ""
+            ).lstrip("@").lower()
+            # if author missing, keep (upstream sometimes omits field)
+            if author and author != uname:
+                continue
+            filtered.append(t)
+        return filtered
+
+    @staticmethod
+    def _tweet_id(t: dict[str, Any]) -> str:
+        for k in ("id", "id_str", "tweetId", "tweet_id", "twId"):
+            v = t.get(k)
+            if v is not None and str(v).strip():
+                return str(v).strip()
+        # fallback: text+time fingerprint
+        text = str(t.get("text") or t.get("full_text") or t.get("content") or "")[:120]
+        tm = str(t.get("createdAt") or t.get("created_at") or t.get("time") or "")
+        return f"{tm}|{text}"
+
+    @classmethod
+    def _merge_tweets(
+        cls,
+        *batches: list[dict[str, Any]],
+        limit: int = 25,
+    ) -> list[dict[str, Any]]:
+        seen: set[str] = set()
+        out: list[dict[str, Any]] = []
+        for batch in batches:
+            for t in batch:
+                if not isinstance(t, dict):
+                    continue
+                tid = cls._tweet_id(t)
+                if tid in seen:
+                    continue
+                seen.add(tid)
+                out.append(t)
+                if len(out) >= limit:
+                    return out
+        return out
+
     async def user_tweets_resilient(
         self,
         username: str,
         max_results: int = 20,
     ) -> tuple[list[dict[str, Any]], list[str]]:
         """
-        Try multiple strategies. Observed: product=Latest often 400s on brand-new
-        meme accounts while product=Top still works.
-        Returns (tweets, notes).
+        Multi-strategy fetch for ops analysis.
+
+        Known 6551 quirk: ``twitter_user_tweets`` often returns **only 1** post
+        (e.g. a featured/pinned-style item) even when the account has thousands
+        of posts. ``twitter_search`` + ``fromUser`` usually returns a full page.
+
+        Strategy:
+        1. Try user_tweets (Latest/Top ± replies)
+        2. Always supplement with search when still thin (< max_results)
+        3. Merge + dedupe by tweet id
         """
         username = username.lstrip("@").strip()
         notes: list[str] = []
+        collected: list[dict[str, Any]] = []
+        # "thin" = not enough for a real ops timeline (not just any non-empty)
+        target = max(5, min(max_results, 25))
+
         strategies: list[dict[str, Any]] = [
             {"product": "Latest", "includeReplies": False, "includeRetweets": False},
             {"product": "Top", "includeReplies": False, "includeRetweets": False},
@@ -192,38 +279,56 @@ class TwitterClient:
                     include_retweets=s["includeRetweets"],
                 )
                 if tweets:
-                    if s["product"] != "Latest" or s["includeReplies"]:
-                        notes.append(
-                            f"使用备用策略 product={s['product']}"
-                            f" replies={s['includeReplies']} 拉到 {len(tweets)} 条"
-                        )
-                    return tweets, notes
-                notes.append(f"product={s['product']} 返回空列表")
+                    before = len(collected)
+                    collected = self._merge_tweets(collected, tweets, limit=max_results)
+                    added = len(collected) - before
+                    notes.append(
+                        f"user_tweets product={s['product']} "
+                        f"replies={s['includeReplies']} raw={len(tweets)} +{added}"
+                    )
+                    # keep going if still thin — don't return early on 1 tweet
+                    if len(collected) >= target:
+                        break
+                else:
+                    notes.append(f"product={s['product']} 返回空列表")
             except TwitterError as e:
                 notes.append(f"product={s['product']} 失败: {e}")
                 log.warning("user_tweets %s %s failed: %s", username, s["product"], e)
                 continue
 
-        # last resort: search from user
-        try:
-            data = await self.post(
-                "/open/twitter_search",
-                {
-                    "fromUser": username,
-                    "maxResults": max_results,
-                    "product": "Latest",
-                },
-                retries=1,
-            )
-            tweets = self._extract_tweet_list(data)
-            if tweets:
-                notes.append(f"降级 twitter_search fromUser 拉到 {len(tweets)} 条")
-                return tweets, notes
-            notes.append("twitter_search fromUser 为空")
-        except TwitterError as e:
-            notes.append(f"twitter_search 失败: {e}")
+        # Supplement / primary path: search fromUser (often the real timeline)
+        if len(collected) < target:
+            for product in ("Latest", "Top"):
+                try:
+                    searched = await self.search_from_user(
+                        username, max_results=max_results, product=product
+                    )
+                    if searched:
+                        before = len(collected)
+                        collected = self._merge_tweets(
+                            collected, searched, limit=max_results
+                        )
+                        notes.append(
+                            f"twitter_search fromUser product={product} "
+                            f"raw={len(searched)} 合并后={len(collected)} "
+                            f"(+{len(collected) - before})"
+                        )
+                        if len(collected) >= target:
+                            break
+                    else:
+                        notes.append(f"twitter_search product={product} 为空")
+                except TwitterError as e:
+                    notes.append(f"twitter_search product={product} 失败: {e}")
 
-        return [], notes
+        if not collected:
+            return [], notes
+
+        if len(collected) == 1:
+            notes.append(
+                "仅 1 条：6551 user_tweets/search 对该账号只返回极少内容，"
+                "非前端截断；可稍后重试或换账号"
+            )
+        return collected[:max_results], notes
 
     @staticmethod
     def _extract_tweet_list(data: Any) -> list[dict[str, Any]]:
