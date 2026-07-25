@@ -56,15 +56,18 @@ function publicChartUrl(chain: string, address: string) {
 
 export default function TokenWorkspacePage() {
   return (
-    <Suspense
-      fallback={
-        <div className="flex h-full items-center justify-center text-zinc-400">
-          加载工作台…
-        </div>
-      }
-    >
+    <Suspense fallback={<WorkspaceSuspenseFallback />}>
       <WorkspaceInner />
     </Suspense>
+  );
+}
+
+function WorkspaceSuspenseFallback() {
+  const { t } = useI18n();
+  return (
+    <div className="flex h-full items-center justify-center text-zinc-400">
+      {t("ws.loading")}
+    </div>
   );
 }
 
@@ -113,36 +116,48 @@ function WorkspaceInner() {
     }
   }, [chain, address]);
 
-  // short welcome only
+  // short welcome — re-seed when token or language changes
   useEffect(() => {
     if (!token) return;
-    const key = `${token.chain}:${token.address}`;
+    const key = `${token.chain}:${token.address}:${locale}`;
     if (seeded.current === key) return;
+    const prevKey = seeded.current;
     seeded.current = key;
-    setMessages([
-      {
-        id: uid(),
-        role: "assistant",
-        content:
-          `正在对标 **${token.symbol}**。\n\n` +
-          `左侧看盘面，中间拆 **推特立项路径** 和 **网站运营**，右侧跟我复盘。\n\n` +
-          `输入框上方可点 **运营思路** 生成你自己的方案；也可直接提问。学结构、换皮相，不做假官方。`,
-      },
-    ]);
-  }, [token?.chain, token?.address, token?.symbol]);
+    const welcome = t("ws.welcome", { symbol: token.symbol });
+    // only hard-reset chat when token changes; language toggle refreshes first assistant msg
+    if (!prevKey || !prevKey.startsWith(`${token.chain}:${token.address}:`)) {
+      setMessages([
+        {
+          id: uid(),
+          role: "assistant",
+          content: welcome,
+        },
+      ]);
+      return;
+    }
+    setMessages((prev) => {
+      if (prev.length === 0) {
+        return [{ id: uid(), role: "assistant", content: welcome }];
+      }
+      if (prev[0].role === "assistant") {
+        return [{ ...prev[0], content: welcome }, ...prev.slice(1)];
+      }
+      return [{ id: uid(), role: "assistant", content: welcome }, ...prev];
+    });
+  }, [token?.chain, token?.address, token?.symbol, locale, t]);
 
   // one brief when analysis ready (no extra widgets)
   useEffect(() => {
     if (!token || !analysis) return;
     const id = `brief_${token.address}`;
-    const content = buildBriefText(token, analysis);
+    const content = buildBriefText(token, analysis, t);
     setMessages((prev) => {
       if (prev.some((m) => m.id === id)) {
         return prev.map((m) => (m.id === id ? { ...m, content } : m));
       }
       return [...prev, { id, role: "assistant" as const, content }];
     });
-  }, [analysis, token]);
+  }, [analysis, token, t, locale]);
 
   const runNarrative = useCallback(
     async (t: Token) => {
@@ -333,10 +348,17 @@ function WorkspaceInner() {
   useEffect(() => {
     if (!token) return;
     // 3 steps: 摘要 / 推特 / 网站 — top bar progress without auto-opening drawer
-    const sid = startAgentSession(`分析工作台 · ${token.symbol}`, 3);
+    const sid = startAgentSession(
+      locale === "en"
+        ? `Workspace · ${token.symbol}`
+        : `分析工作台 · ${token.symbol}`,
+      3
+    );
     agentLog(
       "system",
-      `进入 ${token.chain}/${shortAddr(token.address)}`,
+      locale === "en"
+        ? `Open ${token.chain}/${shortAddr(token.address)}`
+        : `进入 ${token.chain}/${shortAddr(token.address)}`,
       "info"
     );
     void (async () => {
@@ -345,10 +367,16 @@ function WorkspaceInner() {
         runOps(token),
         runWebsite(token),
       ]);
-      endAgentSession(sid, "done", `${token.symbol} 三列数据就绪`);
+      endAgentSession(
+        sid,
+        "done",
+        locale === "en"
+          ? `${token.symbol} columns ready`
+          : `${token.symbol} 三列数据就绪`
+      );
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token?.address]);
+  }, [token?.address, locale]);
 
   useEffect(() => {
     chatEnd.current?.scrollIntoView({ behavior: "smooth" });
@@ -365,8 +393,19 @@ function WorkspaceInner() {
     chatAbortRef.current = ac;
     setPlaybookBusy(true);
     setChatBusy(true);
-    const sid = startAgentSession(`生成运营思路 · ${token.symbol}`, 1);
-    agentLog("llm", "汇总左列盘面 + 中列推特/网站…", "run");
+    const sid = startAgentSession(
+      locale === "en"
+        ? `Ops playbook · ${token.symbol}`
+        : `生成运营思路 · ${token.symbol}`,
+      1
+    );
+    agentLog(
+      "llm",
+      locale === "en"
+        ? "Merging board + Twitter/website…"
+        : "汇总左列盘面 + 中列推特/网站…",
+      "run"
+    );
     setMessages((m) => [
       ...m,
       {
@@ -395,18 +434,30 @@ function WorkspaceInner() {
           content: res.content || (locale === "en" ? "(empty)" : "（空）"),
         },
       ]);
-      agentLog("llm", "运营思路已写入右侧对话", "ok");
+      agentLog(
+        "llm",
+        locale === "en" ? "Playbook written to chat" : "运营思路已写入右侧对话",
+        "ok"
+      );
       endAgentSession(sid, "done");
     } catch (e) {
       if (e instanceof RequestAbortedError || ac.signal.aborted) {
-        agentLog("llm", "用户停止生成", "warn");
-        endAgentSession(sid, "error", "已停止生成");
+        agentLog(
+          "llm",
+          locale === "en" ? "Stopped by user" : "用户停止生成",
+          "warn"
+        );
+        endAgentSession(
+          sid,
+          "error",
+          locale === "en" ? "Stopped" : "已停止生成"
+        );
         setMessages((m) => [
           ...m,
           {
             id: uid(),
             role: "assistant",
-            content: "已停止生成。",
+            content: locale === "en" ? "Generation stopped." : "已停止生成。",
           },
         ]);
       } else {
@@ -418,7 +469,10 @@ function WorkspaceInner() {
           {
             id: uid(),
             role: "assistant",
-            content: `手册失败：${msg}`,
+            content:
+              locale === "en"
+                ? `Playbook failed: ${msg}`
+                : `手册失败：${msg}`,
           },
         ]);
       }
@@ -463,8 +517,17 @@ function WorkspaceInner() {
       files: attachments.map((a) => ({ name: a.name })),
     };
     setMessages((m) => [...m, userMsg]);
-    const sid = startAgentSession("对话回复", 1);
-    agentLog("chat", `用户提问 · ${text.slice(0, 40) || "附件"}…`, "run");
+    const sid = startAgentSession(
+      locale === "en" ? "Chat reply" : "对话回复",
+      1
+    );
+    agentLog(
+      "chat",
+      locale === "en"
+        ? `User · ${text.slice(0, 40) || "attachment"}…`
+        : `用户提问 · ${text.slice(0, 40) || "附件"}…`,
+      "run"
+    );
     try {
       const history = [...messages, userMsg].map((m) => ({
         role: m.role,
@@ -500,32 +563,53 @@ function WorkspaceInner() {
       });
       setMessages((m) => [
         ...m,
-        { id: uid(), role: "assistant", content: res.content || "（空）" },
+        {
+          id: uid(),
+          role: "assistant",
+          content: res.content || (locale === "en" ? "(empty)" : "（空）"),
+        },
       ]);
-      agentLog("chat", "回复完成", "ok");
-      endAgentSession(sid, "done", "回复完成");
+      agentLog("chat", locale === "en" ? "Reply done" : "回复完成", "ok");
+      endAgentSession(
+        sid,
+        "done",
+        locale === "en" ? "Reply done" : "回复完成"
+      );
     } catch (e) {
       if (e instanceof RequestAbortedError || ac.signal.aborted) {
-        agentLog("chat", "用户停止生成", "warn");
-        endAgentSession(sid, "error", "已停止生成");
+        agentLog(
+          "chat",
+          locale === "en" ? "Stopped by user" : "用户停止生成",
+          "warn"
+        );
+        endAgentSession(
+          sid,
+          "error",
+          locale === "en" ? "Stopped" : "已停止生成"
+        );
         setMessages((m) => [
           ...m,
           {
             id: uid(),
             role: "assistant",
-            content: "已停止生成。",
+            content: locale === "en" ? "Generation stopped." : "已停止生成。",
           },
         ]);
       } else {
         const msg = e instanceof Error ? e.message : String(e);
         agentLog("chat", `对话失败: ${msg}`, "err");
-        endAgentSession(sid, "error", "对话失败");
+        endAgentSession(
+          sid,
+          "error",
+          locale === "en" ? "Chat failed" : "对话失败"
+        );
         setMessages((m) => [
           ...m,
           {
             id: uid(),
             role: "assistant",
-            content: `失败：${msg}`,
+            content:
+              locale === "en" ? `Failed: ${msg}` : `失败：${msg}`,
           },
         ]);
       }
@@ -641,17 +725,17 @@ function WorkspaceInner() {
               onClick={() => setShowMoreMarket((v) => !v)}
               className="text-[11px] text-zinc-400 hover:text-zinc-600"
             >
-              {showMoreMarket ? "收起盘面" : "更多盘面数据"}
+              {showMoreMarket ? t("ws.lessMarket") : t("ws.moreMarket")}
             </button>
             {showMoreMarket && (
               <div className="grid grid-cols-2 gap-1.5 text-[11px]">
-                <Mini label="流动性" value={fmtUsd(token.liquidity)} />
+                <Mini label={t("ws.liquidity")} value={fmtUsd(token.liquidity)} />
                 <Mini
-                  label="持有人"
+                  label={t("ws.holders")}
                   value={String(token.holder_count ?? "—")}
                 />
                 <Mini
-                  label="Top10"
+                  label={t("ws.top10")}
                   value={
                     token.top_10_holder_rate != null
                       ? `${(token.top_10_holder_rate * 100).toFixed(0)}%`
@@ -659,7 +743,7 @@ function WorkspaceInner() {
                   }
                 />
                 <Mini
-                  label="Rug"
+                  label={t("ws.rug")}
                   value={
                     token.rug_ratio != null
                       ? token.rug_ratio.toFixed(2)
@@ -667,11 +751,11 @@ function WorkspaceInner() {
                   }
                 />
                 <Mini
-                  label="SM/KOL"
+                  label={t("ws.smKol")}
                   value={`${token.smart_degen_count ?? 0}/${token.renowned_count ?? 0}`}
                 />
                 {token.launchpad_platform && (
-                  <Mini label="平台" value={token.launchpad_platform} />
+                  <Mini label={t("ws.platform")} value={token.launchpad_platform} />
                 )}
               </div>
             )}
@@ -679,14 +763,14 @@ function WorkspaceInner() {
             {/* identity snapshot — flat, line-separated */}
             <div className="border border-zinc-200 p-3">
               <p className="text-[10px] font-semibold text-zinc-400">
-                这盘是什么
+                {t("ws.whatIsThis")}
               </p>
               {loadingN && !analysis ? (
-                <p className="mt-1.5 text-xs text-zinc-400">摘要中…</p>
+                <p className="mt-1.5 text-xs text-zinc-400">{t("ws.summaryLoading")}</p>
               ) : (
                 <>
                   <p className="mt-1.5 text-[13px] font-medium leading-snug text-zinc-900">
-                    {analysis?.one_liner || "暂无摘要"}
+                    {analysis?.one_liner || t("ws.noSummary")}
                   </p>
                   <div className="mt-2 flex flex-wrap gap-1">
                     {(analysis?.track || analysis?.narrative_type) && (
@@ -702,12 +786,12 @@ function WorkspaceInner() {
                   </div>
                   {analysis?.emotional_hook && (
                     <p className="mt-2 text-[11px] leading-snug text-zinc-600">
-                      钩子：{analysis.emotional_hook}
+                      {t("ws.hook", { text: analysis.emotional_hook })}
                     </p>
                   )}
                   {!!analysis?.risks?.length && (
                     <p className="mt-2 text-[11px] text-amber-800">
-                      注意：{analysis.risks[0]}
+                      {t("ws.note", { text: analysis.risks[0] })}
                     </p>
                   )}
                 </>
@@ -768,7 +852,7 @@ function WorkspaceInner() {
         <aside className="flex min-h-0 flex-col bg-white lg:col-span-4">
           <div className="flex h-10 shrink-0 items-center border-b border-zinc-100 px-3">
             <h2 className="text-[12px] font-semibold text-zinc-800">
-              复盘 · {token.symbol}
+              {t("ws.recapTitle", { symbol: token.symbol })}
             </h2>
           </div>
 
@@ -868,12 +952,18 @@ function WorkspaceInner() {
   );
 }
 
-function buildBriefText(token: Token, analysis: Analysis): string {
+function buildBriefText(
+  token: Token,
+  analysis: Analysis,
+  t: (key: string, params?: Record<string, string | number>) => string
+): string {
   const lines = [
-    `**${token.symbol}** 基础信息好了。`,
-    analysis.one_liner ? `一句话：${analysis.one_liner}` : "",
+    t("ws.briefReady", { symbol: token.symbol }),
+    analysis.one_liner
+      ? t("ws.briefOneLiner", { line: analysis.one_liner })
+      : "",
     "",
-    "中间在拆推特立项路径和网站；拆完后可在输入框上方点 **运营思路**，或直接提问。",
+    t("ws.briefHint"),
   ];
   return lines.filter(Boolean).join("\n");
 }
