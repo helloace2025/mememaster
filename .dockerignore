@@ -1,0 +1,17 @@
+**/.git
+**/.venv
+**/node_modules
+**/.next
+**/.env
+**/.env.*
+!**/.env.example
+**/__pycache__
+**/*.pyc
+**/*.log
+**/dev.out.log
+**/dev.err.log
+.grok
+tools
+*.pdf
+.DS_Store
+Thumbs.db

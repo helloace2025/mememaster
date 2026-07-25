@@ -1,9 +1,10 @@
-# Single Railway service: unified Next.js UI + FastAPI (see root Dockerfile)
+# Single Railway service: Next.js UI + FastAPI (root Dockerfile)
 [build]
 builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-healthcheckPath = "/api/health"
-healthcheckTimeout = 60
+# Hit the Next.js UI (not API-only). Start period allows cold boot.
+healthcheckPath = "/"
+healthcheckTimeout = 120
 restartPolicyType = "ON_FAILURE"
