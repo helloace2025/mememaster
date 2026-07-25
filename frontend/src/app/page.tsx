@@ -243,7 +243,7 @@ export default function DashboardPage() {
     saveFocusToken(t);
   };
 
-  /** Resolve pasted CA via GMGN and surface as custom row. */
+  /** Resolve pasted CA and surface as custom row. */
   const lookupCustom = useCallback(
     async (raw?: string, goAnalyze = false) => {
       const addr = (raw ?? q).trim();
