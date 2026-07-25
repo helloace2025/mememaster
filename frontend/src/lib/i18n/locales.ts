@@ -12,6 +12,13 @@ export const zh: Dict = {
   "nav.lang.zh": "中文",
   "nav.lang.en": "EN",
   "nav.switchLang": "切换语言 / Language",
+  // status pills — generic names (do not expose third-party vendors)
+  "nav.pill.market": "行情",
+  "nav.pill.social": "社媒",
+  "nav.pill.ai": "模型",
+  "nav.pill.market.tip": "行情数据通道",
+  "nav.pill.social.tip": "社媒数据通道",
+  "nav.pill.ai.tip": "大模型通道",
 
   // agent terminal (short)
   "agent.idle": "待命",
@@ -60,7 +67,7 @@ export const zh: Dict = {
   "board.col.social": "社交",
   "board.analyze": "分析",
   "board.footer":
-    "币龄过滤走 GMGN max-created · 缓存 {min} 分钟 · 仅供研究教育",
+    "币龄按创建时间过滤 · 缓存 {min} 分钟 · 仅供研究教育",
   "board.noX": "无 X",
   "board.deadX": "已注销",
   "board.age.24h": "24h 内",
@@ -174,6 +181,7 @@ export const zh: Dict = {
   "ws.chip.sop": "运营SOP（换皮版）",
   "ws.chatPh": "问：他们怎么立项的？我怎么换皮做…",
   "ws.thinking": "思考中…",
+  "ws.openChart": "打开行情页",
 
   // common
   "common.disclaimer": "仅供研究教育，非投资建议",
@@ -187,6 +195,12 @@ export const en: Dict = {
   "nav.lang.zh": "中文",
   "nav.lang.en": "EN",
   "nav.switchLang": "Switch language / 切换语言",
+  "nav.pill.market": "Market",
+  "nav.pill.social": "Social",
+  "nav.pill.ai": "Model",
+  "nav.pill.market.tip": "Market data channel",
+  "nav.pill.social.tip": "Social data channel",
+  "nav.pill.ai.tip": "LLM channel",
 
   "agent.idle": "idle",
   "agent.running": "running",
@@ -234,7 +248,7 @@ export const en: Dict = {
   "board.col.social": "Social",
   "board.analyze": "Analyze",
   "board.footer":
-    "Age via GMGN max-created · cache {min} min · research only",
+    "Age filtered by creation time · cache {min} min · research only",
   "board.noX": "No X",
   "board.deadX": "Deleted",
   "board.age.24h": "Within 24h",
@@ -346,6 +360,7 @@ export const en: Dict = {
   "ws.chip.sop": "Ops SOP (reskin)",
   "ws.chatPh": "Ask: how did they launch? how should I reskin…",
   "ws.thinking": "Thinking…",
+  "ws.openChart": "Open chart",
 
   "common.disclaimer": "Research & education only — not investment advice",
   "common.close": "Close",

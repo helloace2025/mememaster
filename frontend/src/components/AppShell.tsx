@@ -65,9 +65,21 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
           <div className="flex shrink-0 items-center gap-1.5">
             <LangToggle />
-            <Pill ok={!!health?.gmgn_key} label="GMGN" />
-            <Pill ok={!!health?.opennews_token} label="6551" />
-            <Pill ok={!!health?.llm_key} label="LLM" />
+            <Pill
+              ok={!!health?.gmgn_key}
+              label={t("nav.pill.market")}
+              title={t("nav.pill.market.tip")}
+            />
+            <Pill
+              ok={!!health?.opennews_token}
+              label={t("nav.pill.social")}
+              title={t("nav.pill.social.tip")}
+            />
+            <Pill
+              ok={!!health?.llm_key}
+              label={t("nav.pill.ai")}
+              title={t("nav.pill.ai.tip")}
+            />
           </div>
         </div>
 
@@ -134,9 +146,18 @@ function TopLink({
   );
 }
 
-function Pill({ ok, label }: { ok: boolean; label: string }) {
+function Pill({
+  ok,
+  label,
+  title,
+}: {
+  ok: boolean;
+  label: string;
+  title?: string;
+}) {
   return (
     <span
+      title={title || label}
       className={`hidden rounded px-1.5 py-0.5 font-mono text-[9px] font-semibold tracking-wide sm:inline ${
         ok
           ? "bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-400/40"

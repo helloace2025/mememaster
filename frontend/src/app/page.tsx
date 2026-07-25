@@ -135,9 +135,9 @@ export default function DashboardPage() {
           .map(([c]) => c);
 
         if (fc) {
-          agentLog("gmgn", `命中本地缓存 · ${total} tokens`, "ok");
+          agentLog("market", `命中本地缓存 · ${total} tokens`, "ok");
         } else {
-          agentLog("gmgn", `GMGN 返回 · ${total} tokens`, "ok");
+          agentLog("market", `行情返回 · ${total} tokens`, "ok");
         }
         for (const c of ALL_CHAIN_IDS) {
           const n = payload.byChain[c]?.length ?? 0;
@@ -146,11 +146,11 @@ export default function DashboardPage() {
           else agentLog(c, `${n} 条`, n ? "ok" : "warn");
         }
         if (errChains.length) {
-          agentLog("gmgn", `部分链失败: ${errChains.join(", ")}`, "warn");
+          agentLog("market", `部分链失败: ${errChains.join(", ")}`, "warn");
         }
 
         if (rv && !force) {
-          agentLog("gmgn", "后台静默刷新中…", "run");
+          agentLog("market", "后台静默刷新中…", "run");
           const started = payload.fetchedAt;
           const timer = window.setInterval(() => {
             const next = peekHotCache({
@@ -167,7 +167,7 @@ export default function DashboardPage() {
                 (n, arr) => n + (arr?.length || 0),
                 0
               );
-              agentLog("gmgn", `后台刷新完成 · ${n2} tokens`, "ok");
+              agentLog("market", `后台刷新完成 · ${n2} tokens`, "ok");
               endAgentSession(sid, "done", "热门面板就绪");
             }
           }, 800);
@@ -181,7 +181,7 @@ export default function DashboardPage() {
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        agentLog("gmgn", `抓取失败: ${msg}`, "err");
+        agentLog("market", `抓取失败: ${msg}`, "err");
         endAgentSession(sid, "error", "热门抓取失败");
         if (!hasRows) {
           setError(msg);
@@ -255,7 +255,7 @@ export default function DashboardPage() {
       setCustomLoading(true);
       setCustomError(null);
       const sid = startAgentSession("查询自定义代币", 1);
-      agentLog("gmgn", `token info · ${chain} · ${addr.slice(0, 8)}…`, "run");
+      agentLog("market", `token info · ${chain} · ${addr.slice(0, 8)}…`, "run");
       try {
         const res = await getToken({
           chain,
@@ -286,7 +286,7 @@ export default function DashboardPage() {
         const msg = e instanceof Error ? e.message : String(e);
         setCustomToken(null);
         setCustomError(msg);
-        agentLog("gmgn", `查询失败: ${msg}`, "err");
+        agentLog("market", `查询失败: ${msg}`, "err");
         endAgentSession(sid, "error", "自定义代币查询失败");
       } finally {
         setCustomLoading(false);
