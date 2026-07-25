@@ -212,11 +212,11 @@ async def fetch_website(url: str, timeout: float = 12.0) -> dict[str, Any]:
                 **summary,
             }
     except httpx.TimeoutException:
-        return {"ok": False, "error": "请求超时", "url": url}
-    except httpx.HTTPError as e:
-        return {"ok": False, "error": f"网络错误: {e}", "url": url}
-    except Exception as e:
-        return {"ok": False, "error": str(e), "url": url}
+        return {"ok": False, "error": "timeout", "url": url}
+    except httpx.HTTPError:
+        return {"ok": False, "error": "network", "url": url}
+    except Exception:
+        return {"ok": False, "error": "fetch_failed", "url": url}
 
 
 async def analyze_website(
@@ -233,16 +233,26 @@ async def analyze_website(
     L = normalize_lang(lang)
     fetched = await fetch_website(url)
     if not fetched.get("ok"):
-        err = fetched.get("error") or ("unknown error" if L == "en" else "未知错误")
+        code = str(fetched.get("error") or "fetch_failed")
         if L == "en":
+            human = {
+                "timeout": "Request timed out",
+                "network": "Network error",
+                "fetch_failed": "Could not load the page",
+            }.get(code, "Could not load the page")
             content = (
-                f"Could not open the site: {err}\n\n"
+                f"{human}.\n\n"
                 f"URL: {url}\n"
-                "Possible causes: downtime, bot protection, client-only render, or bad link."
+                "Possible causes: downtime, bot protection, client-only render, or a bad link."
             )
         else:
+            human = {
+                "timeout": "请求超时",
+                "network": "网络错误",
+                "fetch_failed": "无法打开网站",
+            }.get(code, "无法打开网站")
             content = (
-                f"无法打开网站：{err}\n\n"
+                f"{human}。\n\n"
                 f"URL：{url}\n"
                 "可能原因：站点宕机、防爬、仅客户端渲染、或链接无效。"
             )

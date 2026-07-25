@@ -6,10 +6,14 @@ import json
 import re
 from typing import Any
 
+import logging
+
 from app.config import Settings
 from app.services.lang import Lang, normalize_lang, with_lang
 from app.services.llm import chat_json, resolve_llm, openai_client, ResolvedLLM
 from app.services.twitter import TwitterClient, TwitterError
+
+log = logging.getLogger("mememaster.chat")
 
 COPILOT_SYSTEM_ZH = """你是 MemeMaster「运营共创副驾驶」——帮用户**复盘左侧盘面 + 中间推特/网站拆解**，沉淀成自己的运营思路。
 
@@ -398,23 +402,21 @@ async def analyze_twitter_ops(
     try:
         bundle = await fetch_twitter_bundle(settings, username, max_tweets=max_tweets)
     except TwitterError as e:
+        log.warning("twitter fetch error @%s: %s", username, e)
         return {
             "ok": False,
             "username": username,
             "profile": None,
             "tweets": [],
             "tweet_count": 0,
-            "content": _twitter_fetch_failed_message(
-                username,
-                notes=[f"6551 error: {e}"],
-                lang=L,
-            ),
+            "content": _twitter_fetch_failed_message(username, lang=L),
             "source": "twitter_error",
-            "fetch_notes": [str(e)],
             "error_code": "twitter_api_error",
         }
 
     notes = bundle.get("fetch_notes") or []
+    if notes:
+        log.info("twitter fetch notes @%s: %s", username, " | ".join(notes[:8]))
     tweets_compact = bundle.get("tweets_compact") or []
 
     # No tweets → hard stop. Never ask LLM to invent an ops path from handle/bio.
@@ -427,13 +429,11 @@ async def analyze_twitter_ops(
             "tweet_count": 0,
             "content": _twitter_fetch_failed_message(
                 username,
-                notes=notes,
                 profile=bundle.get("profile") if isinstance(bundle.get("profile"), dict) else None,
                 profile_error=bundle.get("profile_error"),
                 lang=L,
             ),
             "source": "twitter_empty",
-            "fetch_notes": notes,
             "error_code": "no_tweets",
         }
 
@@ -441,17 +441,18 @@ async def analyze_twitter_ops(
         q_default = "Using only real tweets, teardown launch path and social ops"
         rules = "Use only recent_tweets; never invent missing posts. Analysis in English."
         prompt_head = (
-            "Real tweets from 6551. Rebuild the launch path only from recent_tweets; "
+            "Real tweets below. Rebuild the launch path only from recent_tweets; "
             "do not invent content not present. Output fully in English:\n"
         )
     else:
         q_default = "基于真实推文拆解立项路径与运营"
         rules = "只能依据 recent_tweets；禁止编造未出现的推文内容"
         prompt_head = (
-            "以下为 6551 真实抓取的推文数据。请严格依据 recent_tweets 还原立项路径；"
+            "以下为真实抓取的推文数据。请严格依据 recent_tweets 还原立项路径；"
             "没有写在推文里的内容不要编造：\n"
         )
 
+    # Never send internal fetch diagnostics to the model (leaks into UI prose).
     user_payload = {
         "question": question or q_default,
         "lang": L,
@@ -465,7 +466,6 @@ async def analyze_twitter_ops(
         "twitter_profile": bundle.get("profile"),
         "recent_tweets": tweets_compact,
         "tweet_count": bundle.get("tweet_count"),
-        "fetch_notes": notes,
         "rules": rules,
     }
 
@@ -482,20 +482,21 @@ async def analyze_twitter_ops(
             temperature=0.4,
         )
     except Exception as llm_err:
-        # Tweets were fetched successfully — never 500 the whole ops panel
+        # Tweets OK — surface a clean summary, no stack/API internals
+        log.warning("twitter ops LLM failed @%s: %s", username, llm_err)
         if L == "en":
             lines = [
-                f"## @{username}: fetched {len(tweets_compact)} tweets, but model analysis failed",
-                f"Reason: {llm_err}",
+                f"## @{username} — {len(tweets_compact)} tweets fetched",
+                "Model analysis failed; recent posts listed below.",
                 "",
                 "### Recent tweets",
             ]
         else:
             lines = [
-                f"## @{username} 推文已抓到（{len(tweets_compact)} 条），但模型分析失败",
-                f"原因：{llm_err}",
+                f"## @{username} — 已抓取 {len(tweets_compact)} 条推文",
+                "模型分析暂时失败，以下为最近推文摘要。",
                 "",
-                "### 最近推文摘要",
+                "### 最近推文",
             ]
         for i, t in enumerate(tweets_compact[:12], 1):
             text = str((t or {}).get("text") or "")[:220]
@@ -511,20 +512,9 @@ async def analyze_twitter_ops(
             "provider": None,
             "model": None,
             "source": "twitter_ops_partial",
-            "fetch_notes": notes + [f"llm_error: {llm_err}"],
             "error_code": "llm_failed_after_fetch",
+            "lang": L,
         }
-
-    # soft prefix if we had to use fallback strategy
-    if notes and any(
-        ("备用" in n or "降级" in n or "search" in n.lower() or "合并" in n) for n in notes
-    ):
-        prefix = (
-            f"(Fetch note: {notes[-1]})\n\n"
-            if L == "en"
-            else f"（数据拉取备注：{notes[-1]}）\n\n"
-        )
-        content = prefix + content
 
     return {
         "ok": True,
@@ -536,7 +526,6 @@ async def analyze_twitter_ops(
         "provider": resolved.provider_id,
         "model": resolved.model,
         "source": "twitter_ops",
-        "fetch_notes": notes,
         "lang": L,
     }
 

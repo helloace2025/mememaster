@@ -293,14 +293,13 @@ async def hot_tokens(
                 "count": len(tokens),
                 "tokens": tokens,
             }
-            if not tokens:
-                block["hint"] = (
-                    "rank empty after fetch — check GMGN_API_KEY / gmgn-cli / IPv4 "
-                    "and Railway logs for mememaster.gmgn warnings"
-                )
             return block
         except Exception as e:
-            return {"chain": chain, "ok": False, "error": str(e), "count": 0, "tokens": []}
+            # Keep error short for API clients; full detail stays in server logs
+            msg = str(e)
+            if len(msg) > 180:
+                msg = msg[:180] + "…"
+            return {"chain": chain, "ok": False, "error": msg, "count": 0, "tokens": []}
 
     results = await asyncio.gather(*[fetch_chain(c) for c in chain_list])
     by_chain = {r["chain"]: r for r in results}

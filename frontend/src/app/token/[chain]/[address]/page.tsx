@@ -262,6 +262,7 @@ function WorkspaceInner() {
         setOpsText(
           res.content || (en ? "No result" : "无结果")
         );
+        // Product meta only — no model / fetch diagnostics
         setOpsMeta(
           [
             res.username ? `@${res.username}` : "",
@@ -270,7 +271,6 @@ function WorkspaceInner() {
                 ? `${res.tweet_count} posts`
                 : `${res.tweet_count} 条`
               : "",
-            res.model,
           ]
             .filter(Boolean)
             .join(" · ")
@@ -345,16 +345,8 @@ function WorkspaceInner() {
           ...llmRequestFields(llm, locale),
         });
         setWebText(res.content || (en ? "No result" : "无结果"));
-        const tech = res.fetch?.tech_hints?.slice(0, 4).join(", ");
-        setWebMeta(
-          [
-            res.final_url || res.url || t.website,
-            tech ? (en ? `stack: ${tech}` : `栈: ${tech}`) : "",
-            res.model,
-          ]
-            .filter(Boolean)
-            .join(" · ")
-        );
+        // URL only in meta — stack/model are for the analysis body, not chrome
+        setWebMeta(res.final_url || res.url || t.website || "");
         if (res.ok === false) {
           agentLog(
             "web",

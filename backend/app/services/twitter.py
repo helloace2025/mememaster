@@ -15,7 +15,7 @@ import httpx
 
 from app.config import Settings
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("mememaster.twitter")
 
 
 class TwitterError(Exception):
@@ -324,10 +324,10 @@ class TwitterClient:
             return [], notes
 
         if len(collected) == 1:
-            notes.append(
-                "仅 1 条：6551 user_tweets/search 对该账号只返回极少内容，"
-                "非前端截断；可稍后重试或换账号"
-            )
+            notes.append("thin_timeline: only 1 tweet after merge")
+        # notes are for server logs only — never surface in UI content
+        if notes:
+            log.debug("user_tweets_resilient %s: %s", username, " | ".join(notes[:6]))
         return collected[:max_results], notes
 
     @staticmethod
