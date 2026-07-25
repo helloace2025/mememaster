@@ -4,8 +4,9 @@ import asyncio
 import re
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from app.config import get_settings
@@ -29,6 +30,56 @@ app = FastAPI(
     description="热门代币面板 + 叙事/立项分析（研究教育用途，非投资建议）",
     version="0.1.0",
 )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Never leak bare 500 HTML to the browser for API routes used by the UI."""
+    path = request.url.path or ""
+    # Keep FastAPI HTTPException behavior
+    if isinstance(exc, HTTPException):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.detail, "ok": False},
+        )
+    # Soft-fail Twitter / website / analyze so the panel never shows "Internal Server Error"
+    soft_paths = (
+        "/api/twitter/",
+        "/api/website/",
+        "/api/analyze",
+        "/api/playbook",
+        "/api/chat",
+    )
+    if any(path.startswith(p) for p in soft_paths):
+        lang = "en"
+        try:
+            # best-effort: body already consumed — default zh/en from query
+            lang = (request.query_params.get("lang") or "zh").lower()
+        except Exception:
+            pass
+        if lang.startswith("en"):
+            content = (
+                "Something went wrong while processing this request. "
+                "Please try **Re-run** in a moment."
+            )
+        else:
+            content = "处理请求时出错，请稍后点「重新分析」再试。"
+        return JSONResponse(
+            status_code=200,
+            content={
+                "ok": False,
+                "content": content,
+                "source": "server_soft_error",
+                "error_code": "unhandled",
+                "disclaimer": lang_disclaimer(
+                    "en" if lang.startswith("en") else "zh"
+                ),
+            },
+        )
+    return JSONResponse(
+        status_code=500,
+        content={"ok": False, "detail": "Internal server error"},
+    )
 
 # Railway / multi-origin: CORS_ORIGINS=* or comma list of frontend URLs
 _cors_all = settings.cors_allow_all
@@ -546,7 +597,7 @@ async def twitter_ops_endpoint(body: TwitterOpsBody) -> dict[str, Any]:
             model=body.model,
             api_key=body.api_key,
             base_url=body.base_url,
-            max_tweets=min(50, max(5, body.max_tweets)),
+            max_tweets=min(20, max(5, body.max_tweets or 20)),
             lang=L,
         )
     except TwitterError as e:

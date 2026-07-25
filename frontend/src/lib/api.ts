@@ -39,9 +39,43 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(text || `HTTP ${res.status}`);
+    // Prefer soft JSON body from API; never surface bare "Internal Server Error"
+    try {
+      const j = JSON.parse(text) as {
+        content?: string;
+        detail?: string;
+        ok?: boolean;
+      };
+      if (typeof j?.content === "string" && j.content.trim()) {
+        // Soft payload returned with non-2xx (proxy edge cases)
+        return j as T;
+      }
+      const detail =
+        typeof j?.detail === "string"
+          ? j.detail
+          : j?.detail != null
+            ? JSON.stringify(j.detail)
+            : "";
+      if (detail && !/internal server error/i.test(detail)) {
+        throw new Error(detail);
+      }
+    } catch (parseErr) {
+      if (parseErr instanceof Error && parseErr.message && !(parseErr instanceof SyntaxError)) {
+        if (!/internal server error/i.test(parseErr.message)) throw parseErr;
+      }
+    }
+    if (res.status >= 500) {
+      throw new Error("SERVICE_TEMP_UNAVAILABLE");
+    }
+    throw new Error(text.slice(0, 200) || `HTTP ${res.status}`);
   }
   return res.json() as Promise<T>;
+}
+
+/** Slim token for POST bodies — drop bulky raw rank payload. */
+export function slimToken(token: Token): Token {
+  const { raw: _raw, ...rest } = token as Token & { raw?: unknown };
+  return rest as Token;
 }
 
 export function getHealth() {
@@ -113,20 +147,23 @@ export type LlmOpts = {
 };
 
 export function analyzeToken(token: Token, opts?: LlmOpts) {
-  return request<{ analysis: Analysis; twitter?: unknown }>(`/api/analyze`, {
-    method: "POST",
-    body: JSON.stringify({
-      chain: token.chain,
-      address: token.address,
-      token,
-      include_twitter: true,
-      lang: opts?.lang || "zh",
-      provider: opts?.provider,
-      model: opts?.model,
-      api_key: opts?.api_key,
-      base_url: opts?.base_url,
-    }),
-  });
+  return request<{ analysis: Analysis; twitter?: unknown; ok?: boolean; content?: string }>(
+    `/api/analyze`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        chain: token.chain,
+        address: token.address,
+        token: slimToken(token),
+        include_twitter: true,
+        lang: opts?.lang || "zh",
+        provider: opts?.provider,
+        model: opts?.model,
+        api_key: opts?.api_key,
+        base_url: opts?.base_url,
+      }),
+    }
+  );
 }
 
 export function twitterOps(
@@ -152,13 +189,13 @@ export function twitterOps(
     method: "POST",
     body: JSON.stringify({
       username: opts.username,
-      token: opts.token,
+      token: opts.token ? slimToken(opts.token) : undefined,
       question:
         opts.question ||
         (en
           ? "Using only real tweets: teardown launch path — first post hook, concept, project push, visual system"
           : "还原立项路径：第一条推文怎么切入、概念怎么讲、项目怎么推、配图视觉系统怎么立"),
-      max_tweets: opts.max_tweets ?? 25,
+      max_tweets: opts.max_tweets ?? 20,
       lang: opts.lang || "zh",
       provider: opts.provider,
       model: opts.model,
@@ -192,7 +229,7 @@ export function websiteOps(
     method: "POST",
     body: JSON.stringify({
       url: opts.url,
-      token: opts.token,
+      token: opts.token ? slimToken(opts.token) : undefined,
       lang: opts.lang || "zh",
       provider: opts.provider,
       model: opts.model,

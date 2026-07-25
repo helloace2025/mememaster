@@ -365,12 +365,16 @@ async def fetch_twitter_bundle(
 
     profile: dict[str, Any] | None = None
     profile_error: str | None = None
+    # tweets first (ops needs them); profile is optional enrichment
+    tweets, fetch_notes = await tw.user_tweets_resilient(
+        username, max_results=max_tweets
+    )
     try:
         profile = await tw.user_info(username)
     except TwitterError as e:
         profile_error = str(e)
+        log.warning("user_info @%s: %s", username, e)
 
-    tweets, fetch_notes = await tw.user_tweets_resilient(username, max_results=max_tweets)
     tweets_compact = compact_tweets(tweets, max_tweets)
 
     return {
@@ -379,7 +383,6 @@ async def fetch_twitter_bundle(
         "profile_error": profile_error,
         "tweets": tweets,
         "tweets_compact": tweets_compact,
-        # count compact (what LLM / UI actually sees)
         "tweet_count": len(tweets_compact),
         "fetch_notes": fetch_notes,
     }

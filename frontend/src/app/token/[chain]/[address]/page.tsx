@@ -259,9 +259,13 @@ function WorkspaceInner() {
             : `拆解 @${t.twitter_username}（${t.symbol}）的立项路径：第一条推文怎么切入、概念怎么介绍、项目怎么推进、配图视觉系统怎么做。`,
           ...llmRequestFields(llm, locale),
         });
-        setOpsText(
-          res.content || (en ? "No result" : "无结果")
-        );
+        // Soft API always returns content; never surface HTTP status text
+        const body =
+          (res.content && String(res.content).trim()) ||
+          (en
+            ? "No tweet analysis available. Try Re-run."
+            : "暂无推文分析，请点重新分析。");
+        setOpsText(body);
         // Product meta only — no model / fetch diagnostics
         setOpsMeta(
           [
@@ -304,15 +308,22 @@ function WorkspaceInner() {
           );
         }
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
+        const raw = e instanceof Error ? e.message : String(e);
+        const friendly =
+          raw === "SERVICE_TEMP_UNAVAILABLE" ||
+          /internal server error/i.test(raw)
+            ? en
+              ? "Tweet analysis is temporarily unavailable. Please try **Re-run** in a moment."
+              : "推文分析暂时不可用，请稍后点 **重新分析**。"
+            : en
+              ? `Could not complete tweet analysis. Please try Re-run.`
+              : `推文分析未完成，请点重新分析再试。`;
         agentLog(
           "twitter",
-          en ? `Fetch/analysis failed: ${msg}` : `抓取/分析失败: ${msg}`,
+          en ? "Tweet analysis failed (soft)" : "推文分析失败（已降级）",
           "err"
         );
-        setOpsText(
-          en ? `Tweet analysis failed: ${msg}` : `推文分析失败：${msg}`
-        );
+        setOpsText(friendly);
         tickAgentProgress(en ? "Twitter failed" : "推特失败");
       } finally {
         setLoadingO(false);
@@ -403,11 +414,11 @@ function WorkspaceInner() {
       "info"
     );
     void (async () => {
-      await Promise.all([
-        runNarrative(token),
-        runOps(token),
-        runWebsite(token),
-      ]);
+      // Sequential: avoid 3 concurrent LLM+IO spikes that OOM small Railway dynos
+      // and surface as bare "Internal Server Error" on Twitter ops.
+      await runOps(token);
+      await runNarrative(token);
+      await runWebsite(token);
       endAgentSession(
         sid,
         "done",

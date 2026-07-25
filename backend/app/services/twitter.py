@@ -60,7 +60,8 @@ class TwitterClient:
         for attempt in range(retries + 1):
             try:
                 async with httpx.AsyncClient(
-                    timeout=httpx.Timeout(timeout, connect=15.0),
+                    # Keep short so Railway proxy / Next rewrite does not 500 first
+                    timeout=httpx.Timeout(min(timeout, 28.0), connect=10.0),
                     transport=_ipv4_transport(),
                     follow_redirects=True,
                 ) as client:
@@ -245,89 +246,73 @@ class TwitterClient:
         max_results: int = 20,
     ) -> tuple[list[dict[str, Any]], list[str]]:
         """
-        Multi-strategy fetch for ops analysis.
+        Multi-strategy fetch for ops analysis — optimized for speed + yield.
 
-        Known 6551 quirk: ``twitter_user_tweets`` often returns **only 1** post
-        (e.g. a featured/pinned-style item) even when the account has thousands
-        of posts. ``twitter_search`` + ``fromUser`` usually returns a full page.
+        6551 quirk: ``twitter_user_tweets`` often returns only 1 post.
+        ``twitter_search`` + ``fromUser`` usually returns a full page.
 
-        Strategy:
-        1. Try user_tweets (Latest/Top ± replies)
-        2. Always supplement with search when still thin (< max_results)
-        3. Merge + dedupe by tweet id
+        Order (fast path first):
+        1. search Latest / Top
+        2. one user_tweets Latest pass if still thin
         """
         username = username.lstrip("@").strip()
         notes: list[str] = []
         collected: list[dict[str, Any]] = []
-        # "thin" = not enough for a real ops timeline (not just any non-empty)
-        target = max(5, min(max_results, 25))
+        target = max(5, min(max_results, 20))
 
-        strategies: list[dict[str, Any]] = [
-            {"product": "Latest", "includeReplies": False, "includeRetweets": False},
-            {"product": "Top", "includeReplies": False, "includeRetweets": False},
-            {"product": "Latest", "includeReplies": True, "includeRetweets": True},
-            {"product": "Top", "includeReplies": True, "includeRetweets": True},
-        ]
+        # 1) Primary: search fromUser (usually full timeline)
+        for product in ("Latest", "Top"):
+            try:
+                searched = await self.search_from_user(
+                    username, max_results=max_results, product=product
+                )
+                if searched:
+                    before = len(collected)
+                    collected = self._merge_tweets(
+                        collected, searched, limit=max_results
+                    )
+                    notes.append(
+                        f"search product={product} raw={len(searched)} "
+                        f"merged={len(collected)} (+{len(collected) - before})"
+                    )
+                    if len(collected) >= target:
+                        break
+                else:
+                    notes.append(f"search product={product} empty")
+            except TwitterError as e:
+                notes.append(f"search product={product} fail")
+                log.warning("search_from_user %s %s: %s", username, product, e)
 
-        for s in strategies:
+        # 2) Fallback: single user_tweets call (avoid 4× sequential rounds)
+        if len(collected) < target:
             try:
                 tweets = await self.user_tweets(
                     username,
                     max_results=max_results,
-                    product=s["product"],
-                    include_replies=s["includeReplies"],
-                    include_retweets=s["includeRetweets"],
+                    product="Latest",
+                    include_replies=True,
+                    include_retweets=True,
                 )
                 if tweets:
                     before = len(collected)
-                    collected = self._merge_tweets(collected, tweets, limit=max_results)
-                    added = len(collected) - before
+                    collected = self._merge_tweets(
+                        collected, tweets, limit=max_results
+                    )
                     notes.append(
-                        f"user_tweets product={s['product']} "
-                        f"replies={s['includeReplies']} raw={len(tweets)} +{added}"
+                        f"user_tweets Latest raw={len(tweets)} "
+                        f"merged={len(collected)} (+{len(collected) - before})"
                     )
-                    # keep going if still thin — don't return early on 1 tweet
-                    if len(collected) >= target:
-                        break
-                else:
-                    notes.append(f"product={s['product']} 返回空列表")
             except TwitterError as e:
-                notes.append(f"product={s['product']} 失败: {e}")
-                log.warning("user_tweets %s %s failed: %s", username, s["product"], e)
-                continue
+                notes.append("user_tweets fail")
+                log.warning("user_tweets %s: %s", username, e)
 
-        # Supplement / primary path: search fromUser (often the real timeline)
-        if len(collected) < target:
-            for product in ("Latest", "Top"):
-                try:
-                    searched = await self.search_from_user(
-                        username, max_results=max_results, product=product
-                    )
-                    if searched:
-                        before = len(collected)
-                        collected = self._merge_tweets(
-                            collected, searched, limit=max_results
-                        )
-                        notes.append(
-                            f"twitter_search fromUser product={product} "
-                            f"raw={len(searched)} 合并后={len(collected)} "
-                            f"(+{len(collected) - before})"
-                        )
-                        if len(collected) >= target:
-                            break
-                    else:
-                        notes.append(f"twitter_search product={product} 为空")
-                except TwitterError as e:
-                    notes.append(f"twitter_search product={product} 失败: {e}")
-
-        if not collected:
-            return [], notes
-
-        if len(collected) == 1:
-            notes.append("thin_timeline: only 1 tweet after merge")
-        # notes are for server logs only — never surface in UI content
         if notes:
-            log.debug("user_tweets_resilient %s: %s", username, " | ".join(notes[:6]))
+            log.info(
+                "user_tweets_resilient @%s n=%s notes=%s",
+                username,
+                len(collected),
+                " | ".join(notes[:6]),
+            )
         return collected[:max_results], notes
 
     @staticmethod
