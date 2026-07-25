@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { chat, loadFocusToken, RequestAbortedError } from "@/lib/api";
+import {
+  chat,
+  friendlyApiError,
+  loadFocusToken,
+  RequestAbortedError,
+} from "@/lib/api";
 import type { Token } from "@/lib/types";
 import RichText from "@/components/RichText";
 import ChatComposer, { type ChatAttachment } from "@/components/ChatComposer";
@@ -204,14 +209,17 @@ export default function ChatPage() {
           { id: uid(), role: "assistant", content: "（已停止生成）" },
         ]);
       } else {
-        const msg = e instanceof Error ? e.message : String(e);
+        const msg = friendlyApiError(e, locale);
         setError(msg);
         setMessages((m) => [
           ...m,
           {
             id: uid(),
             role: "assistant",
-            content: `请求失败：${msg}\n\n请检查后端是否在运行，以及模型/API Key 是否在输入框旁配置正确。`,
+            content:
+              locale === "en"
+                ? `${msg}\n\nIf this keeps happening, check model / API key next to the input.`
+                : `${msg}\n\n若反复出现，请检查输入框旁的模型与 API Key。`,
           },
         ]);
       }

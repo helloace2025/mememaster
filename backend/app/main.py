@@ -551,21 +551,57 @@ async def chat_endpoint(body: ChatBody) -> dict[str, Any]:
             status_code=400,
             detail="No LLM provider configured — 请在对话框配置 API Key 或填写 .env",
         )
+    L = normalize_lang(body.lang)
     try:
         result = await freeform_chat(
             settings,
             message=body.message.strip(),
             history=body.history,
-            context=body.context,
-            provider=body.provider,
-            model=body.model,
-            api_key=body.api_key,
-            base_url=body.base_url,
-            lang=body.lang,
+            # Cap context — huge twitter/website dumps make LLM slow → proxy 500
+            context=_trim_chat_context(body.context),
+            provider=body.provider if body.api_key else None,
+            model=body.model if body.api_key else None,
+            api_key=body.api_key or None,
+            base_url=body.base_url if body.api_key else None,
+            lang=L,
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
-    return {**result, "disclaimer": lang_disclaimer(normalize_lang(body.lang))}
+    except Exception:
+        return {
+            "ok": False,
+            "content": (
+                "The model is busy or timed out. Please try again."
+                if L == "en"
+                else "模型繁忙或超时，请稍后再试。"
+            ),
+            "source": "chat_error",
+            "disclaimer": lang_disclaimer(L),
+        }
+    return {**result, "disclaimer": lang_disclaimer(L)}
+
+
+def _trim_chat_context(ctx: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not ctx:
+        return None
+    out = dict(ctx)
+    for k in ("twitter_ops_excerpt", "website_ops_excerpt"):
+        if isinstance(out.get(k), str) and len(out[k]) > 1200:
+            out[k] = out[k][:1200] + "…"
+    if isinstance(out.get("token_snapshot"), dict):
+        # drop huge nested analysis blobs
+        snap = {
+            kk: out["token_snapshot"].get(kk)
+            for kk in (
+                "one_liner",
+                "narrative_type",
+                "track",
+                "verdict",
+                "risks",
+                "lesson_for_builder",
+            )
+            if out["token_snapshot"].get(kk) is not None
+        }
+        out["token_snapshot"] = snap
+    return out
 
 
 def _resolve_twitter_username(

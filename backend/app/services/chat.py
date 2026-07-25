@@ -671,22 +671,54 @@ async def freeform_chat(
                 f"【会话上下文，可参考】\n{json.dumps(ctx, ensure_ascii=False, default=str)[:6000]}\n\n"
                 f"【用户】\n{message}"
             )
-    content, resolved = await chat_text(
-        settings,
-        copilot_system(L),
-        user,
-        history=history,
-        provider=provider,
-        model=model,
-        api_key=api_key,
-        base_url=base_url,
-        temperature=0.55,
-    )
+    try:
+        content, resolved = await asyncio.wait_for(
+            chat_text(
+                settings,
+                copilot_system(L),
+                user,
+                history=history,
+                provider=provider,
+                model=model,
+                api_key=api_key,
+                base_url=base_url,
+                temperature=0.55,
+            ),
+            timeout=45.0,
+        )
+    except asyncio.TimeoutError:
+        msg = (
+            "The model timed out. Please shorten the question and try again."
+            if L == "en"
+            else "模型响应超时，请缩短问题后重试。"
+        )
+        return {
+            "content": msg,
+            "provider": None,
+            "model": None,
+            "source": "chat_timeout",
+            "ok": False,
+        }
+    except Exception as e:
+        log.warning("freeform_chat failed: %s", e)
+        msg = (
+            "The model is busy. Please try again in a moment."
+            if L == "en"
+            else "模型繁忙，请稍后再试。"
+        )
+        return {
+            "content": msg,
+            "provider": None,
+            "model": None,
+            "source": "chat_error",
+            "ok": False,
+        }
     return {
         "content": content,
         "provider": resolved.provider_id,
         "model": resolved.model,
         "source": "chat",
+        "ok": True,
     }
 
 

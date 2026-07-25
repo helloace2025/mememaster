@@ -6,6 +6,7 @@ import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import {
   analyzeToken,
   chat,
+  friendlyApiError,
   generatePlaybook,
   loadFocusToken,
   RequestAbortedError,
@@ -570,24 +571,15 @@ function WorkspaceInner() {
           },
         ]);
       } else {
-        const msg = e instanceof Error ? e.message : String(e);
-        agentLog(
-          "llm",
-          locale === "en"
-            ? `Playbook failed: ${msg}`
-            : `运营思路失败: ${msg}`,
-          "err"
-        );
+        const msg = friendlyApiError(e, locale);
+        agentLog("llm", msg, "err");
         endAgentSession(sid, "error");
         setMessages((m) => [
           ...m,
           {
             id: uid(),
             role: "assistant",
-            content:
-              locale === "en"
-                ? `Playbook failed: ${msg}`
-                : `手册失败：${msg}`,
+            content: msg,
           },
         ]);
       }
@@ -671,9 +663,16 @@ function WorkspaceInner() {
             twitter_username: token.twitter_username,
             website: token.website,
           },
-          token_snapshot: analysis,
-          twitter_ops_excerpt: opsText.slice(0, 2500),
-          website_ops_excerpt: webText.slice(0, 2000),
+          token_snapshot: analysis
+            ? {
+                one_liner: analysis.one_liner,
+                narrative_type: analysis.narrative_type,
+                track: analysis.track,
+                verdict: analysis.verdict,
+              }
+            : null,
+          twitter_ops_excerpt: opsText.slice(0, 1200),
+          website_ops_excerpt: webText.slice(0, 800),
         },
       });
       setMessages((m) => [
@@ -711,12 +710,8 @@ function WorkspaceInner() {
           },
         ]);
       } else {
-        const msg = e instanceof Error ? e.message : String(e);
-        agentLog(
-          "chat",
-          locale === "en" ? `Chat failed: ${msg}` : `对话失败: ${msg}`,
-          "err"
-        );
+        const msg = friendlyApiError(e, locale);
+        agentLog("chat", msg, "err");
         endAgentSession(
           sid,
           "error",
@@ -727,8 +722,7 @@ function WorkspaceInner() {
           {
             id: uid(),
             role: "assistant",
-            content:
-              locale === "en" ? `Failed: ${msg}` : `失败：${msg}`,
+            content: msg,
           },
         ]);
       }

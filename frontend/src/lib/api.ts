@@ -72,6 +72,26 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/** Map internal error codes to user-facing copy (never show SERVICE_TEMP_UNAVAILABLE raw). */
+export function friendlyApiError(
+  err: unknown,
+  lang: "zh" | "en" | string = "zh"
+): string {
+  const raw = err instanceof Error ? err.message : String(err || "");
+  const en = lang === "en";
+  if (
+    raw === "SERVICE_TEMP_UNAVAILABLE" ||
+    /internal server error/i.test(raw) ||
+    /ECONNRESET|ETIMEDOUT|fetch failed/i.test(raw)
+  ) {
+    return en
+      ? "The model is busy or timed out. Please try again in a moment."
+      : "模型繁忙或请求超时，请稍后再试。";
+  }
+  if (raw.length > 200) return raw.slice(0, 200) + "…";
+  return raw || (en ? "Request failed." : "请求失败。");
+}
+
 /** Slim token for POST bodies — drop bulky raw rank payload. */
 export function slimToken(token: Token): Token {
   const { raw: _raw, ...rest } = token as Token & { raw?: unknown };
