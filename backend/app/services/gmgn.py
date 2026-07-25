@@ -185,6 +185,70 @@ class GmgnClient:
         raw = await self.get("/v1/market/rank", params)
         return self._extract_rank(raw, chain, limit, max_created=max_created)
 
+    async def token_info(self, chain: str, address: str) -> dict[str, Any]:
+        """Fetch single token metadata + realtime price (GMGN token info)."""
+        address = (address or "").strip()
+        chain = (chain or "sol").strip().lower()
+        if not address:
+            raise GmgnError("address is required")
+        if self.cli:
+            try:
+                return await self._token_info_via_cli(chain, address)
+            except Exception as cli_err:
+                if not self.api_key:
+                    raise GmgnError(f"gmgn-cli token info failed: {cli_err}") from cli_err
+                try:
+                    return await self._token_info_via_http(chain, address)
+                except Exception as http_err:
+                    raise GmgnError(
+                        f"cli failed ({cli_err}); http failed ({http_err})"
+                    ) from http_err
+        return await self._token_info_via_http(chain, address)
+
+    async def _token_info_via_cli(self, chain: str, address: str) -> dict[str, Any]:
+        cmd = [
+            self.cli or "gmgn-cli",
+            "token",
+            "info",
+            "--chain",
+            chain,
+            "--address",
+            address,
+            "--raw",
+        ]
+
+        def run() -> str:
+            import subprocess
+
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                shell=False,
+            )
+            if proc.returncode != 0:
+                raise GmgnError(
+                    f"gmgn-cli token info exit {proc.returncode}: "
+                    f"{(proc.stderr or proc.stdout)[:500]}"
+                )
+            return (proc.stdout or "").strip()
+
+        out = await asyncio.to_thread(run)
+        if not out:
+            raise GmgnError("gmgn-cli token info empty")
+        line = out.splitlines()[-1]
+        raw = json.loads(line)
+        return flatten_token_info(raw, chain, address)
+
+    async def _token_info_via_http(self, chain: str, address: str) -> dict[str, Any]:
+        # OpenAPI path used by gmgn-cli token info
+        raw = await self.get(
+            "/v1/token/info",
+            {"chain": chain, "address": address},
+        )
+        return flatten_token_info(raw, chain, address)
+
     def _extract_rank(
         self,
         raw: Any,
@@ -282,6 +346,111 @@ def clean_twitter_username(raw: Any) -> tuple[str, str]:
         if len(s) > 20 or _re.search(r"[^\w]", s):
             return "", "dead"
     return s, "ok"
+
+
+def flatten_token_info(raw: Any, chain: str, address: str) -> dict[str, Any]:
+    """Normalize GMGN token info (CLI/HTTP) into the same shape as rank cards."""
+    data = raw.get("data", raw) if isinstance(raw, dict) else raw
+    if not isinstance(data, dict):
+        data = {}
+    price = data.get("price") if isinstance(data.get("price"), dict) else {}
+    pool = data.get("pool") if isinstance(data.get("pool"), dict) else {}
+    link = data.get("link") if isinstance(data.get("link"), dict) else {}
+    stat = data.get("stat") if isinstance(data.get("stat"), dict) else {}
+    wtags = (
+        data.get("wallet_tags_stat")
+        if isinstance(data.get("wallet_tags_stat"), dict)
+        else {}
+    )
+    dev = data.get("dev") if isinstance(data.get("dev"), dict) else {}
+
+    addr = (
+        data.get("address")
+        or link.get("address")
+        or address
+        or ""
+    )
+    # price payload sometimes nests address
+    if not addr and isinstance(price, dict):
+        addr = price.get("address") or addr
+
+    def fnum(*keys: str, src: dict[str, Any] | None = None) -> float | None:
+        d = src if src is not None else data
+        for k in keys:
+            v = d.get(k) if d else None
+            if v is None or v == "":
+                continue
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    # merge flat fields for normalize_token
+    flat: dict[str, Any] = {
+        **data,
+        "address": addr or address,
+        "symbol": data.get("symbol") or "",
+        "name": data.get("name") or data.get("symbol") or (addr or address)[:8],
+        "logo": data.get("logo") or "",
+        "price": fnum("price", src=price) if price else fnum("price"),
+        "market_cap": fnum("market_cap", "usd_market_cap")
+        or (
+            # estimate from price * circulating if present
+            None
+        ),
+        "liquidity": fnum("liquidity") or fnum("liquidity", src=pool),
+        "volume": fnum("volume_24h", "volume", src=price) or fnum("volume_24h", "volume"),
+        "price_change_percent": None,
+        "holder_count": data.get("holder_count") or stat.get("holder_count"),
+        "smart_degen_count": wtags.get("smart_wallets") or 0,
+        "renowned_count": wtags.get("renowned_wallets") or 0,
+        "twitter_username": link.get("twitter_username") or data.get("twitter_username"),
+        "website": link.get("website") or data.get("website") or "",
+        "telegram": link.get("telegram") or data.get("telegram") or "",
+        "launchpad_platform": data.get("launchpad_platform")
+        or data.get("launchpad")
+        or pool.get("exchange")
+        or "",
+        "creation_timestamp": data.get("creation_timestamp")
+        or data.get("open_timestamp")
+        or pool.get("creation_timestamp"),
+        "open_timestamp": data.get("open_timestamp") or data.get("creation_timestamp"),
+        "top_10_holder_rate": fnum("top_10_holder_rate", src=stat)
+        or fnum("top_10_holder_rate", src=dev),
+        "creator_token_status": dev.get("creator_token_status"),
+        "swaps": price.get("swaps_24h") if price else None,
+        "buys": price.get("buys_24h") if price else None,
+        "sells": price.get("sells_24h") if price else None,
+        "hot_level": price.get("hot_level") if price else None,
+    }
+
+    # 24h change from price_* fields if available
+    try:
+        p0 = float(price.get("price") or 0) if price else 0
+        p24 = float(price.get("price_24h") or 0) if price else 0
+        if p0 > 0 and p24 > 0:
+            flat["price_change_percent"] = (p0 - p24) / p24 * 100.0
+    except (TypeError, ValueError):
+        pass
+
+    # rough mcap: price * circulating_supply
+    if flat.get("market_cap") is None:
+        try:
+            px = float(flat.get("price") or 0)
+            circ = float(data.get("circulating_supply") or data.get("total_supply") or 0)
+            if px > 0 and circ > 0:
+                flat["market_cap"] = px * circ
+        except (TypeError, ValueError):
+            pass
+
+    if not flat.get("volume"):
+        try:
+            flat["volume"] = float(price.get("volume_24h") or 0) if price else None
+        except (TypeError, ValueError):
+            flat["volume"] = None
+
+    return normalize_token(flat, chain)
 
 
 def normalize_token(item: dict[str, Any], chain: str) -> dict[str, Any]:

@@ -71,6 +71,38 @@ export async function getHot(opts: {
   }>(`/api/hot?${q}`);
 }
 
+/** Lookup a custom token by CA (not limited to hot board). */
+export function getToken(opts: {
+  chain: string;
+  address: string;
+  /** try other chains if miss */
+  probe?: boolean;
+}) {
+  const q = new URLSearchParams({
+    chain: opts.chain,
+    address: opts.address.trim(),
+  });
+  if (opts.probe) q.set("probe", "true");
+  return request<{
+    ok: boolean;
+    chain: string;
+    address: string;
+    token: Token;
+    probed?: boolean;
+    disclaimer?: string;
+  }>(`/api/token?${q}`);
+}
+
+/** Heuristic: pasted contract / mint address (Sol base58 or EVM 0x). */
+export function looksLikeContractAddress(raw: string): boolean {
+  const s = raw.trim();
+  if (!s || s.includes(" ")) return false;
+  if (/^0x[a-fA-F0-9]{40}$/.test(s)) return true;
+  // Solana mint: base58, typically 32–44 chars
+  if (/^[1-9A-HJ-NP-Za-km-z]{32,48}$/.test(s)) return true;
+  return false;
+}
+
 export type LlmOpts = {
   provider?: string;
   model?: string;

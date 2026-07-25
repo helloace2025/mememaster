@@ -1,8 +1,13 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { saveFocusToken } from "@/lib/api";
+import {
+  getToken,
+  looksLikeContractAddress,
+  saveFocusToken,
+} from "@/lib/api";
 import {
   formatCacheAge,
   isHotCacheFresh,
@@ -30,6 +35,7 @@ const AGE_OPTIONS = [
 ] as const;
 
 export default function DashboardPage() {
+  const router = useRouter();
   const prefs = typeof window !== "undefined" ? loadHotUiPrefs() : {};
   const [chain, setChain] = useState(prefs.chain || "sol");
   const [interval, setInterval] = useState(
@@ -54,6 +60,9 @@ export default function DashboardPage() {
   const [fromCache, setFromCache] = useState(false);
   const [q, setQ] = useState("");
   const [, setTick] = useState(0);
+  const [customToken, setCustomToken] = useState<Token | null>(null);
+  const [customLoading, setCustomLoading] = useState(false);
+  const [customError, setCustomError] = useState<string | null>(null);
 
   // hydrate from cache instantly
   useEffect(() => {
@@ -219,6 +228,7 @@ export default function DashboardPage() {
     }
     const needle = q.trim().toLowerCase();
     if (!needle) return list;
+    // CA lookup is handled separately — still filter board if partial match
     return list.filter(
       (t) =>
         t.symbol?.toLowerCase().includes(needle) ||
@@ -237,6 +247,72 @@ export default function DashboardPage() {
   const openToken = (t: Token) => {
     saveFocusToken(t);
   };
+
+  /** Resolve pasted CA via GMGN and surface as custom row. */
+  const lookupCustom = useCallback(
+    async (raw?: string, goAnalyze = false) => {
+      const addr = (raw ?? q).trim();
+      if (!looksLikeContractAddress(addr)) {
+        setCustomToken(null);
+        setCustomError(null);
+        return;
+      }
+      setCustomLoading(true);
+      setCustomError(null);
+      const sid = startAgentSession("查询自定义代币", 1);
+      agentLog("gmgn", `token info · ${chain} · ${addr.slice(0, 8)}…`, "run");
+      try {
+        const res = await getToken({
+          chain,
+          address: addr,
+          probe: true,
+        });
+        const t = res.token;
+        setCustomToken(t);
+        if (res.probed && res.chain !== chain) {
+          agentLog(
+            "gmgn",
+            `在 ${res.chain} 命中（当前 Tab 为 ${chain}）`,
+            "warn"
+          );
+        } else {
+          agentLog(
+            "gmgn",
+            `命中 ${t.symbol || shortAddr(t.address)}`,
+            "ok"
+          );
+        }
+        endAgentSession(sid, "done", "自定义代币就绪");
+        if (goAnalyze) {
+          saveFocusToken(t);
+          router.push(`/token/${t.chain}/${t.address}`);
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        setCustomToken(null);
+        setCustomError(msg);
+        agentLog("gmgn", `查询失败: ${msg}`, "err");
+        endAgentSession(sid, "error", "自定义代币查询失败");
+      } finally {
+        setCustomLoading(false);
+      }
+    },
+    [q, chain, router]
+  );
+
+  // Debounced CA lookup when search looks like an address
+  useEffect(() => {
+    const addr = q.trim();
+    if (!looksLikeContractAddress(addr)) {
+      setCustomToken(null);
+      setCustomError(null);
+      return;
+    }
+    const t = window.setTimeout(() => {
+      void lookupCustom(addr, false);
+    }, 450);
+    return () => window.clearTimeout(t);
+  }, [q, chain, lookupCustom]);
 
   const cacheLabel = useMemo(() => {
     if (!fetchedAt) return null;
@@ -334,12 +410,46 @@ export default function DashboardPage() {
             ))}
           </select>
 
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="搜索 symbol / 名称 / CA"
-            className="min-w-[160px] flex-1 rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm outline-none focus:border-emerald-300"
-          />
+          <div className="flex min-w-[200px] flex-1 items-center gap-1.5">
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  if (looksLikeContractAddress(q)) {
+                    void lookupCustom(q, true);
+                  }
+                }
+              }}
+              placeholder="搜索 symbol / 名称，或粘贴合约 CA"
+              className="min-w-0 flex-1 rounded-lg border border-[var(--border)] px-3 py-1.5 font-mono text-sm outline-none focus:border-emerald-300"
+              spellCheck={false}
+            />
+            <button
+              type="button"
+              disabled={customLoading || !q.trim()}
+              onClick={() => {
+                if (looksLikeContractAddress(q)) {
+                  void lookupCustom(q, true);
+                } else {
+                  // non-CA: just keep filter; no-op button for UX
+                }
+              }}
+              className="shrink-0 rounded-lg bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-800 disabled:opacity-40"
+              title={
+                looksLikeContractAddress(q)
+                  ? "查询 CA 并打开分析"
+                  : "按名称筛选列表；粘贴 CA 可查自定义代币"
+              }
+            >
+              {customLoading
+                ? "查询中…"
+                : looksLikeContractAddress(q)
+                  ? "查 CA"
+                  : "筛选"}
+            </button>
+          </div>
           <label
             className="flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-[11px] text-zinc-600"
             title="推特已注销/只剩数字 ID 的盘，默认隐藏"
@@ -357,18 +467,113 @@ export default function DashboardPage() {
           </label>
         </div>
         <p className="mt-2 text-[11px] text-zinc-400">
-          默认隐藏推特已注销（数字乱码 ID）的币。币龄过滤创建时间；热度是近期交易窗口。
+          支持粘贴合约地址（CA）查询热门榜外的自定义代币 · Enter /「查
+          CA」打开分析。币龄过滤创建时间；热度是近期交易窗口。
         </p>
         {chainErrors[chain] && (
           <p className="mt-1 text-xs text-rose-600">{chainErrors[chain]}</p>
         )}
         {error && <p className="mt-1 text-sm text-rose-600">{error}</p>}
+        {customError && (
+          <p className="mt-1 text-xs text-rose-600">自定义代币：{customError}</p>
+        )}
       </div>
 
       <div className="mm-scroll min-h-0 flex-1 overflow-auto p-5">
         {loading && !hasData && (
           <div className="mb-3 text-sm text-zinc-400">加载新币热门榜…</div>
         )}
+
+        {/* Custom CA result — always above hot table when present */}
+        {(customToken || customLoading) && (
+          <div className="mb-4 overflow-hidden rounded-2xl border border-emerald-200 bg-emerald-50/40 shadow-[var(--shadow)]">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-emerald-100 bg-emerald-50/80 px-4 py-2.5">
+              <div>
+                <p className="text-[12px] font-semibold text-emerald-900">
+                  自定义代币
+                  {customLoading ? " · 查询中…" : ""}
+                </p>
+                <p className="text-[10px] text-emerald-800/70">
+                  不在热门榜也可用 CA 打开分析工作台
+                </p>
+              </div>
+              {customToken && (
+                <Link
+                  href={`/token/${customToken.chain}/${customToken.address}`}
+                  onClick={() => openToken(customToken)}
+                  className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-600"
+                >
+                  打开分析 →
+                </Link>
+              )}
+            </div>
+            {customToken && (
+              <div className="flex flex-wrap items-center gap-4 px-4 py-3">
+                <div className="flex min-w-0 items-center gap-2.5">
+                  {customToken.logo ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={customToken.logo}
+                      alt=""
+                      className="h-9 w-9 rounded-full bg-white object-cover"
+                    />
+                  ) : (
+                    <div className="h-9 w-9 rounded-full bg-zinc-200" />
+                  )}
+                  <div className="min-w-0">
+                    <div className="font-semibold text-zinc-900">
+                      {customToken.symbol || "—"}
+                      <span className="ml-2 rounded bg-white px-1.5 py-0.5 text-[10px] font-medium uppercase text-zinc-500 ring-1 ring-zinc-200">
+                        {customToken.chain}
+                      </span>
+                    </div>
+                    <div className="truncate text-xs text-zinc-500">
+                      {customToken.name}
+                    </div>
+                    <div className="mt-0.5 break-all font-mono text-[10px] text-zinc-400">
+                      {customToken.address}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-4 text-sm tabular-nums text-zinc-700">
+                  <div>
+                    <div className="text-[10px] uppercase text-zinc-400">
+                      MCap
+                    </div>
+                    {fmtUsd(customToken.market_cap)}
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase text-zinc-400">
+                      Vol 24h
+                    </div>
+                    {fmtUsd(customToken.volume)}
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase text-zinc-400">
+                      涨跌
+                    </div>
+                    <span
+                      className={
+                        (customToken.price_change_percent ?? 0) >= 0
+                          ? "text-emerald-600"
+                          : "text-rose-600"
+                      }
+                    >
+                      {fmtPct(customToken.price_change_percent)}
+                    </span>
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase text-zinc-400">
+                      币龄
+                    </div>
+                    {fmtAge(customToken.age_hours)}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-white shadow-[var(--shadow)]">
           <table className="w-full text-left text-sm">
             <thead className="sticky top-0 bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500">
@@ -470,7 +675,15 @@ export default function DashboardPage() {
                   >
                     {error
                       ? "加载失败"
-                      : "该条件下暂无新币，可放宽「币龄」或点强制刷新"}
+                      : looksLikeContractAddress(q)
+                        ? customLoading
+                          ? "正在查询自定义 CA…"
+                          : customToken
+                            ? "热门榜无此币 · 见上方「自定义代币」卡片"
+                            : customError
+                              ? "CA 查询失败，请确认链与地址"
+                              : "粘贴 CA 后将自动查询自定义代币"
+                        : "该条件下暂无新币，可放宽「币龄」、粘贴 CA 查自定义币，或点强制刷新"}
                   </td>
                 </tr>
               )}

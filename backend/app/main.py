@@ -155,6 +155,68 @@ async def llm_providers() -> dict[str, Any]:
     }
 
 
+@app.get("/api/token")
+async def get_token(
+    chain: str = Query(default="sol", description="sol|bsc|base|eth|robinhood"),
+    address: str = Query(..., description="token contract / mint address"),
+    probe: bool = Query(
+        default=False,
+        description="if true and chain miss, try other supported chains",
+    ),
+) -> dict[str, Any]:
+    """Lookup a custom token by chain + address (not limited to hot board)."""
+    addr = (address or "").strip()
+    ch = (chain or "sol").strip().lower()
+    if not addr:
+        raise HTTPException(status_code=400, detail="address is required")
+    try:
+        gmgn = GmgnClient(settings)
+    except GmgnError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+    chains_try = [ch]
+    if probe:
+        for c in settings.chains:
+            if c not in chains_try:
+                chains_try.append(c)
+
+    last_err: str | None = None
+    for c in chains_try:
+        try:
+            token = await gmgn.token_info(c, addr)
+            # treat empty shell as soft fail when probing
+            sym = (token.get("symbol") or "").strip()
+            name = (token.get("name") or "").strip()
+            has_meta = bool(sym and sym not in ("?",) and name)
+            has_mkt = bool(token.get("price") or token.get("market_cap") or token.get("volume"))
+            if has_meta or has_mkt or not probe or c == chains_try[-1]:
+                # always return something for the requested chain on last try
+                if not token.get("address"):
+                    token["address"] = addr
+                if not token.get("symbol"):
+                    token["symbol"] = addr[:6] + "…" if len(addr) > 8 else addr
+                if not token.get("name"):
+                    token["name"] = token["symbol"]
+                token["chain"] = c
+                token["custom"] = True
+                return {
+                    "ok": True,
+                    "chain": c,
+                    "address": addr,
+                    "token": token,
+                    "probed": c != ch,
+                    "disclaimer": "仅供研究与教育，非投资建议",
+                }
+        except Exception as e:
+            last_err = str(e)
+            continue
+
+    raise HTTPException(
+        status_code=404,
+        detail=last_err or f"token not found: {ch}:{addr}",
+    )
+
+
 @app.get("/api/hot")
 async def hot_tokens(
     interval: str | None = Query(default=None, description="1h|6h|24h"),
