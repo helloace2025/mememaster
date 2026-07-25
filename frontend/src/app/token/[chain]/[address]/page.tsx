@@ -355,7 +355,10 @@ function WorkspaceInner() {
           url: t.website,
           ...llmRequestFields(llm, locale),
         });
-        setWebText(res.content || (en ? "No result" : "无结果"));
+        const body =
+          (res.content && String(res.content).trim()) ||
+          (en ? "No website analysis." : "暂无网站分析。");
+        setWebText(body);
         // URL only in meta — stack/model are for the analysis body, not chrome
         setWebMeta(res.final_url || res.url || t.website || "");
         if (res.ok === false) {
@@ -368,27 +371,28 @@ function WorkspaceInner() {
         } else {
           agentLog(
             "web",
-            tech
-              ? en
-                ? `Landing teardown done · ${tech}`
-                : `落地页拆解完成 · ${tech}`
-              : en
-                ? "Landing teardown done"
-                : "落地页拆解完成",
+            en ? "Landing teardown done" : "落地页拆解完成",
             "ok"
           );
           tickAgentProgress(en ? "Website done" : "网站完成");
         }
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
+        const raw = e instanceof Error ? e.message : String(e);
+        const friendly =
+          raw === "SERVICE_TEMP_UNAVAILABLE" ||
+          /internal server error/i.test(raw)
+            ? en
+              ? "Website analysis is temporarily unavailable. Please try **Re-run**."
+              : "网站分析暂时不可用，请稍后点 **重新分析**。"
+            : en
+              ? "Could not complete website analysis. Please try Re-run."
+              : "网站分析未完成，请点重新分析再试。";
         agentLog(
           "web",
-          en ? `Website analysis failed: ${msg}` : `网站分析失败: ${msg}`,
+          en ? "Website analysis failed (soft)" : "网站分析失败（已降级）",
           "err"
         );
-        setWebText(
-          en ? `Website analysis failed: ${msg}` : `网站分析失败：${msg}`
-        );
+        setWebText(friendly);
         tickAgentProgress(en ? "Website failed" : "网站失败");
       } finally {
         setLoadingW(false);
