@@ -1,8 +1,7 @@
-# Railway service: Root Directory = frontend
+# Railway service: set Root Directory = frontend
 [build]
-builder = "NIXPACKS"
-buildCommand = "npm ci && npm run build"
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "npm run start -- -H 0.0.0.0 -p $PORT"
 restartPolicyType = "ON_FAILURE"

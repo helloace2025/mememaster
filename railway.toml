@@ -1,10 +1,10 @@
-# Railway service: set Root Directory = backend
+# When this service's Root Directory is the **repo root**, build the API.
+# For the web UI: add another service, set Root Directory = frontend.
 [build]
 builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
 healthcheckPath = "/api/health"
 healthcheckTimeout = 30
 restartPolicyType = "ON_FAILURE"

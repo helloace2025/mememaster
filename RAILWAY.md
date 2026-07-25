@@ -1,85 +1,93 @@
 # Deploy MemeMaster on Railway
 
-Monorepo: **two Railway services** from the same GitHub repo.
+## Why the first deploy failed
 
-```
-GitHub: helloace2025/mememaster
-  ├─ backend/   → Service "mememaster-api"
-  └─ frontend/  → Service "mememaster-web"
-```
+Screenshot symptoms:
 
-## 1) API service
+- **Failed to build an image** (≈7s)
+- **0 Variables**
+- Single service from repo root (`mememaster-production…`)
 
-1. New Project → Deploy from GitHub → this repo  
-2. **Settings → Root Directory** = `backend`  
-3. Variables (minimum):
+This is a **monorepo** (`backend/` + `frontend/`). If Railway uses the **repo root** without a root `Dockerfile`, Nixpacks cannot pick one app → **image build fails**.
+
+We now ship a **root `Dockerfile`** that builds the **API**. The web app still needs a **second service**.
+
+---
+
+## Recommended setup (2 services)
+
+### Service A — API（先部署这个）
+
+| Setting | Value |
+|---------|--------|
+| Source | GitHub `helloace2025/mememaster` |
+| Root Directory | leave empty **or** `backend` |
+| Builder | Dockerfile (root `Dockerfile` or `backend/Dockerfile`) |
+
+**Variables（必须加，截图里是 0 Variables）：**
 
 | Variable | Example |
 |----------|---------|
 | `GMGN_API_KEY` | your key |
-| `OPENNEWS_TOKEN` | optional, for X ops |
-| `DEEPSEEK_API_KEY` | or any LLM key |
-| `LLM_PROVIDER` | `auto` or `deepseek` |
-| `CORS_ORIGINS` | `*` first, later lock to FE URL |
+| `DEEPSEEK_API_KEY` | or other LLM key |
+| `LLM_PROVIDER` | `auto` |
+| `CORS_ORIGINS` | `*` （先这样，后面改成前端域名） |
+| `OPENNEWS_TOKEN` | optional |
 
-4. Generate domain → note URL, e.g. `https://mememaster-api-production.up.railway.app`  
-5. Health: `GET /api/health` should return `"ok": true`
+Generate domain → open:
 
-Start command (auto via `backend/railway.toml`):
+`https://<api-host>/api/health` → should show `"ok": true`
 
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port $PORT
-```
+---
 
-## 2) Web service
+### Service B — Web（同一 Project → New Service → 同一仓库）
 
-1. Same project → **Add service** → same repo  
-2. **Root Directory** = `frontend`  
-3. Variables:
+| Setting | Value |
+|---------|--------|
+| Root Directory | **`frontend`** （必填） |
+| Builder | Dockerfile |
 
-| Variable | When | Value |
-|----------|------|--------|
-| `NEXT_PUBLIC_API_BASE` | **Build + Runtime** | `https://your-api.up.railway.app` (no trailing slash) |
+**Variables：**
 
-> `NEXT_PUBLIC_*` is baked in at **build** time. Set it **before** first deploy, or **Redeploy** after changing it.
+| Variable | Scope | Value |
+|----------|--------|--------|
+| `NEXT_PUBLIC_API_BASE` | **Build + Runtime** | `https://<api-host>` （无尾斜杠） |
 
-4. Generate domain for the web service.
+> 改了 `NEXT_PUBLIC_API_BASE` 必须 **Redeploy** 前端（变量打进 JS 包）。
 
-## 3) Lock CORS (recommended)
+Generate domain for the web service → that is the user-facing URL.
 
-After both URLs exist:
+---
+
+## After both are up
+
+On **API** service, set:
 
 ```text
 CORS_ORIGINS=https://your-frontend.up.railway.app
 ```
 
-(on the API service; restart)
+---
 
-## 4) Local smoke before deploy
+## Checklist if build still fails
+
+1. Open **Build Logs**（不只看 Details）  
+2. Confirm Dockerfile is used (not random Nixpacks at empty monorepo root)  
+3. API service has at least the env vars above  
+4. Web service Root Directory is exactly `frontend`  
+5. Web has `NEXT_PUBLIC_API_BASE` pointing at the API public URL  
+
+---
+
+## Local smoke
 
 ```bash
 # API
-cd backend
-pip install -r requirements.txt
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+pip install -r backend/requirements.txt
+uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port 8000
 
 # Web
 cd frontend
-cp .env.example .env.local   # NEXT_PUBLIC_API_BASE=http://127.0.0.1:8000
-npm ci
-npm run build && npm start
+echo NEXT_PUBLIC_API_BASE=http://127.0.0.1:8000 > .env.local
+npm ci && npm run build && npm start
 ```
-
-## Troubleshooting
-
-| Symptom | Fix |
-|---------|-----|
-| FE calls localhost:8000 in browser | `NEXT_PUBLIC_API_BASE` missing at **build**; set + Redeploy FE |
-| CORS errors | Set API `CORS_ORIGINS` to FE origin or `*` |
-| API 502 | Check `GMGN_API_KEY` / logs; open `/api/health` |
-| Build OOM on FE | Railway plan memory; or use Dockerfiles in `frontend/` / `backend/` |
-
-## Optional: Docker
-
-- API: `docker build -t mm-api ./backend`  
-- Web: `docker build --build-arg NEXT_PUBLIC_API_BASE=https://api.example.com -t mm-web ./frontend`

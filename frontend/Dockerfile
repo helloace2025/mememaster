@@ -1,4 +1,5 @@
-# MemeMaster frontend — Railway / Docker
+# MemeMaster frontend — works when Railway Root Directory = frontend
+# (build context = frontend/)
 FROM node:20-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -9,7 +10,7 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Must be set at build time for client bundle (Railway env / ARG)
+# Set in Railway Variables (available at build time)
 ARG NEXT_PUBLIC_API_BASE=http://127.0.0.1:8000
 ENV NEXT_PUBLIC_API_BASE=$NEXT_PUBLIC_API_BASE
 ENV NEXT_TELEMETRY_DISABLED=1
