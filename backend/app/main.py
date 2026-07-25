@@ -181,14 +181,21 @@ async def root() -> dict[str, Any]:
 
 
 @app.get("/api/health")
-async def health() -> dict[str, Any]:
+async def health(
+    probe_twitter: bool = Query(
+        default=False,
+        description="if true, live-test 6551 tweet fetch (adds ~1–3s)",
+    ),
+    username: str = Query(default="elonmusk", description="handle for probe_twitter"),
+) -> dict[str, Any]:
     import shutil
 
     active = resolve_llm(settings)
     providers = provider_status(settings)
     gmgn_cli_path = shutil.which("gmgn-cli")
-    return {
+    body: dict[str, Any] = {
         "ok": True,
+        "version": "0.1.1",
         "gmgn_key": bool(settings.gmgn_api_key),
         "gmgn_cli": bool(gmgn_cli_path),
         "gmgn_cli_path": gmgn_cli_path,
@@ -209,11 +216,20 @@ async def health() -> dict[str, Any]:
         "chains": settings.chains,
         "interval": settings.hot_interval,
         "hot_max_created": settings.hot_max_created,
+        "endpoints": {
+            "twitter_ops": "POST /api/twitter/ops",
+            "twitter_probe": "GET /api/health?probe_twitter=1&username=poohrobinhood",
+        },
         "disclaimer": "仅供研究与教育，非投资建议",
     }
+    if probe_twitter:
+        body["twitter_probe"] = await probe_opennews(settings, username=username)
+    return body
 
 
 @app.get("/api/debug/twitter")
+@app.get("/api/twitter/probe")
+@app.get("/api/twitter/debug")
 async def debug_twitter(
     username: str = Query(default="elonmusk", description="X handle to probe"),
 ) -> dict[str, Any]:
