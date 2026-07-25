@@ -151,7 +151,7 @@ function WorkspaceInner() {
       agentLog("token", `读取 ${t.symbol} 基础元数据 (${t.chain})`, "run");
       agentLog("llm", `摘要分析 ${t.symbol}…`, "run");
       try {
-        const res = await analyzeToken(t, llmRequestFields(llm));
+        const res = await analyzeToken(t, llmRequestFields(llm, locale));
         setAnalysis(res.analysis);
         saveFocusToken(t);
         agentLog(
@@ -171,39 +171,66 @@ function WorkspaceInner() {
         setLoadingN(false);
       }
     },
-    [llm]
+    [llm, locale]
   );
 
   const runOps = useCallback(
     async (t: Token) => {
+      const en = locale === "en";
       if (t.twitter_status === "dead" || t.skip_research) {
-        setOpsText("X 已失效，跳过推文分析。");
+        setOpsText(
+          en
+            ? "X account invalid — skipped tweet analysis."
+            : "X 已失效，跳过推文分析。"
+        );
         setOpsMeta("");
-        agentLog("twitter", "X 已失效，跳过", "warn");
-        tickAgentProgress("推特已跳过");
+        agentLog("twitter", en ? "X invalid, skip" : "X 已失效，跳过", "warn");
+        tickAgentProgress(en ? "Twitter skipped" : "推特已跳过");
         return;
       }
       if (!t.twitter_username) {
-        setOpsText("无有效 X，跳过推文分析。");
+        setOpsText(
+          en
+            ? "No valid X handle — skipped tweet analysis."
+            : "无有效 X，跳过推文分析。"
+        );
         setOpsMeta("");
-        agentLog("twitter", "无 twitter_username，跳过", "warn");
-        tickAgentProgress("推特已跳过");
+        agentLog(
+          "twitter",
+          en ? "no twitter_username, skip" : "无 twitter_username，跳过",
+          "warn"
+        );
+        tickAgentProgress(en ? "Twitter skipped" : "推特已跳过");
         return;
       }
       setLoadingO(true);
-      agentLog("social", `抓取 @${t.twitter_username} 推文…`, "run");
+      agentLog(
+        "social",
+        en
+          ? `Fetching @${t.twitter_username} tweets…`
+          : `抓取 @${t.twitter_username} 推文…`,
+        "run"
+      );
       try {
         const res = await twitterOps({
           token: t,
           username: t.twitter_username,
-          question: `拆解 @${t.twitter_username}（${t.symbol}）的立项路径：第一条推文怎么切入、概念怎么介绍、项目怎么推进、配图视觉系统怎么做。`,
-          ...llmRequestFields(llm),
+          question: en
+            ? `Teardown @${t.twitter_username} (${t.symbol}) launch path: first post hook, concept intro, project push, visual system. Full answer in English.`
+            : `拆解 @${t.twitter_username}（${t.symbol}）的立项路径：第一条推文怎么切入、概念怎么介绍、项目怎么推进、配图视觉系统怎么做。`,
+          ...llmRequestFields(llm, locale),
         });
-        setOpsText(res.content || "无结果");
+        setOpsText(
+          res.content || (en ? "No result" : "无结果")
+        );
         setOpsMeta(
           [
             res.username ? `@${res.username}` : "",
-            res.tweet_count != null ? `${res.tweet_count} 条` : "",
+            res.tweet_count != null
+              ? en
+                ? `${res.tweet_count} posts`
+                : `${res.tweet_count} 条`
+              : "",
             res.model,
           ]
             .filter(Boolean)
@@ -212,38 +239,53 @@ function WorkspaceInner() {
         if (res.ok === false || !(res.tweet_count && res.tweet_count > 0)) {
           agentLog(
             "twitter",
-            `未抓到推文，已停止分析（不编造）· ${res.tweet_count ?? 0} 条`,
+            en
+              ? `No tweets fetched · ${res.tweet_count ?? 0}`
+              : `未抓到推文，已停止分析（不编造）· ${res.tweet_count ?? 0} 条`,
             "err"
           );
-          tickAgentProgress("推特无数据");
+          tickAgentProgress(en ? "Twitter empty" : "推特无数据");
         } else {
           agentLog(
             "twitter",
-            `立项路径拆解完成 · ${res.tweet_count} 条`,
+            en
+              ? `Launch path done · ${res.tweet_count} posts`
+              : `立项路径拆解完成 · ${res.tweet_count} 条`,
             "ok"
           );
-          agentLog("llm", "推特运营路径写入中间列", "ok");
-          tickAgentProgress(`推特完成 · ${res.tweet_count} 条`);
+          agentLog(
+            "llm",
+            en ? "Twitter ops written to middle column" : "推特运营路径写入中间列",
+            "ok"
+          );
+          tickAgentProgress(
+            en
+              ? `Twitter done · ${res.tweet_count}`
+              : `推特完成 · ${res.tweet_count} 条`
+          );
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         agentLog("twitter", `抓取/分析失败: ${msg}`, "err");
-        setOpsText(`推文分析失败：${msg}`);
-        tickAgentProgress("推特失败");
+        setOpsText(
+          en ? `Tweet analysis failed: ${msg}` : `推文分析失败：${msg}`
+        );
+        tickAgentProgress(en ? "Twitter failed" : "推特失败");
       } finally {
         setLoadingO(false);
       }
     },
-    [llm]
+    [llm, locale]
   );
 
   const runWebsite = useCallback(
     async (t: Token) => {
+      const en = locale === "en";
       if (!t.website) {
         setWebText("");
         setWebMeta("");
-        agentLog("web", "未绑定官网，跳过", "info");
-        tickAgentProgress("网站已跳过");
+        agentLog("web", en ? "No website, skip" : "未绑定官网，跳过", "info");
+        tickAgentProgress(en ? "Website skipped" : "网站已跳过");
         return;
       }
       setLoadingW(true);
@@ -252,40 +294,40 @@ function WorkspaceInner() {
         const res = await websiteOps({
           token: t,
           url: t.website,
-          ...llmRequestFields(llm),
+          ...llmRequestFields(llm, locale),
         });
-        setWebText(res.content || "无结果");
+        setWebText(res.content || (en ? "No result" : "无结果"));
         const tech = res.fetch?.tech_hints?.slice(0, 4).join(", ");
         setWebMeta(
           [
             res.final_url || res.url || t.website,
-            tech ? `栈: ${tech}` : "",
+            tech ? (en ? `stack: ${tech}` : `栈: ${tech}`) : "",
             res.model,
           ]
             .filter(Boolean)
             .join(" · ")
         );
         if (res.ok === false) {
-          agentLog("web", "网站抓取失败或无法解析", "err");
-          tickAgentProgress("网站失败");
+          agentLog("web", en ? "Website fetch failed" : "网站抓取失败或无法解析", "err");
+          tickAgentProgress(en ? "Website failed" : "网站失败");
         } else {
           agentLog(
             "web",
             tech ? `落地页拆解完成 · ${tech}` : "落地页拆解完成",
             "ok"
           );
-          tickAgentProgress("网站完成");
+          tickAgentProgress(en ? "Website done" : "网站完成");
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         agentLog("web", `网站分析失败: ${msg}`, "err");
-        setWebText(`网站分析失败：${msg}`);
-        tickAgentProgress("网站失败");
+        setWebText(en ? `Website analysis failed: ${msg}` : `网站分析失败：${msg}`);
+        tickAgentProgress(en ? "Website failed" : "网站失败");
       } finally {
         setLoadingW(false);
       }
     },
-    [llm]
+    [llm, locale]
   );
 
   useEffect(() => {
@@ -330,7 +372,10 @@ function WorkspaceInner() {
       {
         id: uid(),
         role: "user",
-        content: `基于 ${token.symbol} 的盘面 + 推特/网站拆解，生成我自己的运营思路`,
+        content:
+          locale === "en"
+            ? `Using ${token.symbol} board + Twitter/website teardown, write my own ops playbook (English).`
+            : `基于 ${token.symbol} 的盘面 + 推特/网站拆解，生成我自己的运营思路`,
       },
     ]);
     try {
@@ -339,12 +384,16 @@ function WorkspaceInner() {
         analysis,
         twitter_ops: opsText,
         website_ops: webText,
-        ...llmRequestFields(llm),
+        ...llmRequestFields(llm, locale),
         signal: ac.signal,
       });
       setMessages((m) => [
         ...m,
-        { id: uid(), role: "assistant", content: res.content || "（空）" },
+        {
+          id: uid(),
+          role: "assistant",
+          content: res.content || (locale === "en" ? "(empty)" : "（空）"),
+        },
       ]);
       agentLog("llm", "运营思路已写入右侧对话", "ok");
       endAgentSession(sid, "done");
@@ -424,12 +473,15 @@ function WorkspaceInner() {
       const res = await chat({
         message: messageForLlm,
         history: history.slice(0, -1),
-        ...llmRequestFields(llm),
+        ...llmRequestFields(llm, locale),
         signal: ac.signal,
         context: {
           mode: "ops_review",
+          lang: locale,
           instruction:
-            "基于左侧盘面 + 中间推特立项路径 + 网站拆解，帮用户复盘并沉淀自己的运营思路。学结构不抄皮。Markdown。非投资建议。",
+            locale === "en"
+              ? "Using left board + middle Twitter launch path + website teardown, help the user recap into their own ops plan. Learn structure, not skin. English Markdown. Not investment advice."
+              : "基于左侧盘面 + 中间推特立项路径 + 网站拆解，帮用户复盘并沉淀自己的运营思路。学结构不抄皮。Markdown。非投资建议。",
           benchmark_token: {
             chain: token.chain,
             address: token.address,

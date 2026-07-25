@@ -172,7 +172,7 @@ export default function ChatPage() {
         message,
         history: history.slice(0, -1),
         signal: ac.signal,
-        ...llmRequestFields(llm),
+        ...llmRequestFields(llm, locale),
         context: focus
           ? {
               focus_token: {

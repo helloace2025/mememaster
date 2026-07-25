@@ -108,6 +108,8 @@ export type LlmOpts = {
   model?: string;
   api_key?: string;
   base_url?: string;
+  /** UI locale → LLM output language: zh | en */
+  lang?: "zh" | "en" | string;
 };
 
 export function analyzeToken(token: Token, opts?: LlmOpts) {
@@ -118,6 +120,7 @@ export function analyzeToken(token: Token, opts?: LlmOpts) {
       address: token.address,
       token,
       include_twitter: true,
+      lang: opts?.lang || "zh",
       provider: opts?.provider,
       model: opts?.model,
       api_key: opts?.api_key,
@@ -134,6 +137,7 @@ export function twitterOps(
     max_tweets?: number;
   } & LlmOpts
 ) {
+  const en = (opts.lang || "zh") === "en";
   return request<{
     ok: boolean;
     username?: string;
@@ -151,8 +155,11 @@ export function twitterOps(
       token: opts.token,
       question:
         opts.question ||
-        "还原立项路径：第一条推文怎么切入、概念怎么讲、项目怎么推、配图视觉系统怎么立",
+        (en
+          ? "Using only real tweets: teardown launch path — first post hook, concept, project push, visual system"
+          : "还原立项路径：第一条推文怎么切入、概念怎么讲、项目怎么推、配图视觉系统怎么立"),
       max_tweets: opts.max_tweets ?? 25,
+      lang: opts.lang || "zh",
       provider: opts.provider,
       model: opts.model,
       api_key: opts.api_key,
@@ -186,6 +193,7 @@ export function websiteOps(
     body: JSON.stringify({
       url: opts.url,
       token: opts.token,
+      lang: opts.lang || "zh",
       provider: opts.provider,
       model: opts.model,
       api_key: opts.api_key,
@@ -207,7 +215,10 @@ export function chat(
     `/api/chat`,
     {
       method: "POST",
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        ...body,
+        lang: body.lang || "zh",
+      }),
       signal,
     }
   );
@@ -234,7 +245,10 @@ export function generatePlaybook(
     source?: string;
   }>(`/api/playbook`, {
     method: "POST",
-    body: JSON.stringify(body),
+    body: JSON.stringify({
+      ...body,
+      lang: body.lang || "zh",
+    }),
     signal,
   });
 }

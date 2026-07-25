@@ -7,9 +7,10 @@ import re
 from typing import Any
 
 from app.config import Settings
+from app.services.lang import Lang, normalize_lang, with_lang
 from app.services.llm import chat_json, resolve_llm
 
-SYSTEM_PROMPT = """你是 MemeMaster「选题共创副驾驶」的分析引擎。
+SYSTEM_PROMPT_ZH = """你是 MemeMaster「选题共创副驾驶」的分析引擎。
 任务：基于链上热门代币元数据 + 可选推特资料/推文，输出**可复用的发币指导**（研究教育，非投资建议）。
 
 核心目标（不是喊单）：
@@ -80,6 +81,53 @@ SYSTEM_PROMPT = """你是 MemeMaster「选题共创副驾驶」的分析引擎�
   }
 }
 """
+
+SYSTEM_PROMPT_EN = """You are MemeMaster co-creation analysis engine.
+From hot token metadata + optional Twitter profile/tweets, output **reusable launch guidance** (research only, not investment advice).
+
+Goals:
+- How they set narrative, visual face, site, and Twitter ops
+- Portable structure vs must-not-copy skin
+- Actionable checklists (visual / design / site / Twitter)
+
+Rules:
+1. Portable front-end only (narrative, emotion, IP, cadence, packaging) — no market manipulation.
+2. Lower confidence when thin evidence; never invent tweet text or fake on-chain numbers.
+3. Strict JSON only — no markdown fences.
+
+All **string values in the JSON must be English**.
+
+Schema (fill as much as possible):
+{
+  "narrative_type": "e.g. animal meme / AI agent / local meme / pure flow",
+  "track": "short track tag",
+  "ip_angle": "IP/character angle one-liner",
+  "one_liner": "one-line pitch a kid could repeat",
+  "emotional_hook": "emotional hook",
+  "desire": {"score": 0-10, "note": "identity/share desire"},
+  "game": {"score": 0-10, "note": "participatory actions"},
+  "trust": {"score": 0-10, "note": "holders/dev/optics"},
+  "ip_strength": {"memeable": 0-10, "ownable": 0-10, "visualizable": 0-10},
+  "why_hot_today": "why hot today",
+  "risks": ["..."],
+  "lesson_for_builder": "portable structure lesson",
+  "copy_vs_create": "learn X structure; must change Y skin",
+  "verdict": "worth learning structure / flow only / cautious / skip",
+  "confidence": 0.0-1.0,
+  "guide": {
+    "narrative": {"summary":"","one_liner_template":"","differentiator":"","do":[],"dont":[],"checklist":[]},
+    "visual": {"summary":"","character":"","style_keywords":[],"assets":[],"do":[],"dont":[],"checklist":[]},
+    "website": {"summary":"","has_site":true,"modules":[],"ia_outline":[],"do":[],"dont":[],"checklist":[]},
+    "twitter": {"summary":"","persona":"","cadence":"","content_mix":[],"pre_ca_playbook":[],"sample_angles":[],"do":[],"dont":[],"checklist":[]}
+  }
+}
+"""
+
+SYSTEM_PROMPT = SYSTEM_PROMPT_ZH
+
+
+def analysis_system(lang: Lang) -> str:
+    return with_lang(SYSTEM_PROMPT_EN if lang == "en" else SYSTEM_PROMPT_ZH, lang)
 
 
 def _empty_guide_block(summary: str = "") -> dict[str, Any]:
@@ -287,13 +335,16 @@ async def analyze_token(
     model: str | None = None,
     api_key: str | None = None,
     base_url: str | None = None,
+    lang: str | None = None,
 ) -> dict[str, Any]:
+    L = normalize_lang(lang)
     if not resolve_llm(
         settings, provider, model, api_key_override=api_key, base_url_override=base_url
     ):
         return _heuristic(token, twitter_profile)
 
     payload = {
+        "lang": L,
         "token": {
             k: token.get(k)
             for k in (
@@ -322,15 +373,23 @@ async def analyze_token(
         },
         "twitter_profile": twitter_profile,
         "recent_tweets": (tweets or [])[:8],
-        "task": "四维指导：叙事选题 / 视觉设计 / 网站 / 推特运营 + 欲局信",
+        "task": (
+            "4D guide: narrative / visual / website / Twitter ops + desire-game-trust"
+            if L == "en"
+            else "四维指导：叙事选题 / 视觉设计 / 网站 / 推特运营 + 欲局信"
+        ),
     }
 
+    user_msg = (
+        "Analyze this hot token and output full JSON (with guide 4D). All string values in English:\n"
+        if L == "en"
+        else "分析以下热门代币并输出完整 JSON（含 guide 四维）：\n"
+    )
     try:
         content, resolved = await chat_json(
             settings,
-            SYSTEM_PROMPT,
-            "分析以下热门代币并输出完整 JSON（含 guide 四维）：\n"
-            + json.dumps(payload, ensure_ascii=False, default=str),
+            analysis_system(L),
+            user_msg + json.dumps(payload, ensure_ascii=False, default=str),
             provider_override=provider,
             model_override=model,
             api_key_override=api_key,

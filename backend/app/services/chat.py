@@ -7,10 +7,11 @@ import re
 from typing import Any
 
 from app.config import Settings
+from app.services.lang import Lang, normalize_lang, with_lang
 from app.services.llm import chat_json, resolve_llm, openai_client, ResolvedLLM
 from app.services.twitter import TwitterClient, TwitterError
 
-COPILOT_SYSTEM = """你是 MemeMaster「运营共创副驾驶」——帮用户**复盘左侧盘面 + 中间推特/网站拆解**，沉淀成自己的运营思路。
+COPILOT_SYSTEM_ZH = """你是 MemeMaster「运营共创副驾驶」——帮用户**复盘左侧盘面 + 中间推特/网站拆解**，沉淀成自己的运营思路。
 
 能力边界：
 - 对标别人怎么立项（第一条推文怎么切入、概念怎么讲、视觉怎么立、网站怎么转化）
@@ -26,7 +27,21 @@ COPILOT_SYSTEM = """你是 MemeMaster「运营共创副驾驶」——帮用户*
 - 清单用 `- [ ]`
 """
 
-OPS_SYSTEM = """你是 meme 项目「推特立项路径」拆解教练。
+COPILOT_SYSTEM_EN = """You are MemeMaster ops co-pilot. Help the user turn the board + Twitter/website teardown into their own playbook.
+
+Scope:
+- How others launch (first post hook, concept, visuals, site conversion)
+- Actionable paths: content cadence, visual system, landing page, reskinned plan, SOP
+- Research/education only — not investment advice; never invent on-chain stats or fake tweets
+- Learn structure, do not copy skin
+
+Formatting:
+- **English** Markdown; real newlines; blank lines around ## / ###
+- One list item per line; no Markdown tables for calendars — use ### Day 1 + bullets
+- Checklists with `- [ ]`
+"""
+
+OPS_SYSTEM_ZH = """你是 meme 项目「推特立项路径」拆解教练。
 
 硬性规则（违反即不合格）：
 1. **只根据用户消息里提供的真实推文正文 / 配图 URL / 抓取资料分析**。
@@ -58,27 +73,63 @@ OPS_SYSTEM = """你是 meme 项目「推特立项路径」拆解教练。
 - 不要 \\n 转义、不要 JSON
 """
 
+OPS_SYSTEM_EN = """You are a meme project coach for **Twitter launch-path teardown**.
 
-def _twitter_fetch_failed_message(
-    username: str,
-    *,
-    notes: list[str] | None = None,
-    profile: dict[str, Any] | None = None,
-    profile_error: str | None = None,
-) -> str:
-    """Short, clean failure copy — no stack traces, no speculation."""
-    handle = (username or "").lstrip("@").strip() or "unknown"
-    # notes/profile kept for API logging callers; not dumped into UI copy
-    _ = (notes, profile, profile_error)
-    return (
-        f"**未能获取 @{handle} 的推文**\n\n"
-        f"请检查该用户的推特账号是否异常"
-        f"（如被封禁、注销、限制可见，或绑定的用户名有误）。\n\n"
-        f"没有真实推文时，不会编造运营路径。"
-        f"可点右上角「重新分析」再试，或稍后再刷新。"
-    )
+Hard rules:
+1. Analyze **only** real tweet text / media URLs / materials in the user message.
+2. **Never** invent tweets or launch paths from the handle, ticker, or chain data alone.
+3. If recent_tweets is empty: only say "No tweet evidence — cannot analyze."
+4. Quote original fragments; if missing write "Not shown in tweets".
 
-PLAYBOOK_SYSTEM = """你是 MemeMaster「运营思路」作者。基于对标盘的盘面 + 推特运营拆解 + 网站拆解，写一份**用户自己可用的运营方案**。
+When tweets exist, cover: first hook post, concept intro, project content line, visual system, overall ops.
+
+Write **English** Markdown (not JSON):
+
+## 1. Launch path (timeline)
+## 2. First / key hook post
+## 3. How the concept is explained
+## 4. Visual system (evidence only)
+## 5. Cadence & account persona
+## 6. Reusable plays (3–6)
+## 7. Risks & red flags
+
+Formatting: real newlines; blank lines around headings; no Markdown tables; no escaped \\n.
+"""
+
+
+def ops_system(lang: Lang) -> str:
+    return with_lang(OPS_SYSTEM_EN if lang == "en" else OPS_SYSTEM_ZH, lang)
+
+
+def copilot_system(lang: Lang) -> str:
+    return with_lang(COPILOT_SYSTEM_EN if lang == "en" else COPILOT_SYSTEM_ZH, lang)
+
+
+def playbook_system(lang: Lang) -> str:
+    if lang == "en":
+        body = """You are MemeMaster playbook author. From the board + Twitter ops + website teardown, write a **user's own** ops plan.
+
+Rules:
+1. Research only — not investment advice; learn structure, do not copy skin
+2. **English** Markdown:
+
+# Ops playbook (benchmark $SYMBOL → my launch)
+
+## 0. One-line takeaway (learn / change / skip)
+## 1. Launch path (my hook)
+## 2. Twitter ops
+### 2.1 Persona
+### 2.2 Visual system brief
+### 2.3 Content cadence (use ### Day 1 — no tables)
+### 2.4 Engagement rules
+## 3. Website / landing
+## 4. Must-change skin vs benchmark
+## 5. Risks & taste red lines
+
+Output the user's version; benchmark is structure-only.
+Formatting: real newlines; blank lines around headings; one bullet per line."""
+    else:
+        body = """你是 MemeMaster「运营思路」作者。基于对标盘的盘面 + 推特运营拆解 + 网站拆解，写一份**用户自己可用的运营方案**。
 
 要求：
 1. 研究教育，非投资建议；学结构不抄皮
@@ -87,49 +138,53 @@ PLAYBOOK_SYSTEM = """你是 MemeMaster「运营思路」作者。基于对标盘
 # 运营思路（对标 $SYMBOL → 我的盘）
 
 ## 0. 一句话结论（学什么 / 改什么 / 不学什么）
-
 ## 1. 立项路径（我怎么切入）
-- 第一条推文角度草案
-- 概念怎么三句话说清
-- 发射前后内容线
-
 ## 2. 推特运营
-
 ### 2.1 人设
-（2–4 条列表）
-
 ### 2.2 视觉系统 brief
-（角色 / 主色 / 资产清单，列表）
-
-### 2.3 内容节奏日历
-**禁止 Markdown 表格。** 按天拆开写，例如：
-
-### Day 1（密集期）
-- 内容类型：
-- 目的：
-- 输出要点：
-- 示例角度：（非照抄原文）
-
-### Day 2（加速期）
-- …
-
-### Day 3（成熟期）
-- …
-
+### 2.3 内容节奏日历（### Day 1，禁止表格）
 ### 2.4 互动规则
-（列表，一项一行）
-
 ## 3. 网站 / 落地页
-- 要不要站、首屏信息架构
-- 转化入口（社交/买/社群）
-
 ## 4. 和对照盘的差异点（必须换掉的皮）
-
 ## 5. 风险与品味红线
 
 3. 输出必须是「用户自己的盘」版本，对标只作结构参考
-4. **排版硬性**：真实换行；每个 ## / ### 前后空一行；列表一项一行；**禁止**把多天内容挤进一行或用宽表格
-"""
+4. **排版硬性**：真实换行；每个 ## / ### 前后空一行；列表一项一行"""
+    return with_lang(body, lang)
+
+
+def _twitter_fetch_failed_message(
+    username: str,
+    *,
+    notes: list[str] | None = None,
+    profile: dict[str, Any] | None = None,
+    profile_error: str | None = None,
+    lang: Lang = "zh",
+) -> str:
+    """Short, clean failure copy — no stack traces, no speculation."""
+    handle = (username or "").lstrip("@").strip() or "unknown"
+    _ = (notes, profile, profile_error)
+    if lang == "en":
+        return (
+            f"**Could not fetch tweets for @{handle}**\n\n"
+            f"Check whether the X account is suspended, deleted, restricted, "
+            f"or the linked username is wrong.\n\n"
+            f"We do not invent an ops path without real tweets. "
+            f"Use **Re-run** later or refresh."
+        )
+    return (
+        f"**未能获取 @{handle} 的推文**\n\n"
+        f"请检查该用户的推特账号是否异常"
+        f"（如被封禁、注销、限制可见，或绑定的用户名有误）。\n\n"
+        f"没有真实推文时，不会编造运营路径。"
+        f"可点右上角「重新分析」再试，或稍后再刷新。"
+    )
+
+
+# Back-compat aliases
+COPILOT_SYSTEM = COPILOT_SYSTEM_ZH
+OPS_SYSTEM = OPS_SYSTEM_ZH
+PLAYBOOK_SYSTEM = playbook_system("zh")
 
 async def chat_text(
     settings: Settings,
@@ -337,7 +392,9 @@ async def analyze_twitter_ops(
     api_key: str | None = None,
     base_url: str | None = None,
     max_tweets: int = 25,
+    lang: str | None = None,
 ) -> dict[str, Any]:
+    L = normalize_lang(lang)
     try:
         bundle = await fetch_twitter_bundle(settings, username, max_tweets=max_tweets)
     except TwitterError as e:
@@ -349,7 +406,8 @@ async def analyze_twitter_ops(
             "tweet_count": 0,
             "content": _twitter_fetch_failed_message(
                 username,
-                notes=[f"6551 接口错误: {e}"],
+                notes=[f"6551 error: {e}"],
+                lang=L,
             ),
             "source": "twitter_error",
             "fetch_notes": [str(e)],
@@ -372,14 +430,31 @@ async def analyze_twitter_ops(
                 notes=notes,
                 profile=bundle.get("profile") if isinstance(bundle.get("profile"), dict) else None,
                 profile_error=bundle.get("profile_error"),
+                lang=L,
             ),
             "source": "twitter_empty",
             "fetch_notes": notes,
             "error_code": "no_tweets",
         }
 
+    if L == "en":
+        q_default = "Using only real tweets, teardown launch path and social ops"
+        rules = "Use only recent_tweets; never invent missing posts. Analysis in English."
+        prompt_head = (
+            "Real tweets from 6551. Rebuild the launch path only from recent_tweets; "
+            "do not invent content not present. Output fully in English:\n"
+        )
+    else:
+        q_default = "基于真实推文拆解立项路径与运营"
+        rules = "只能依据 recent_tweets；禁止编造未出现的推文内容"
+        prompt_head = (
+            "以下为 6551 真实抓取的推文数据。请严格依据 recent_tweets 还原立项路径；"
+            "没有写在推文里的内容不要编造：\n"
+        )
+
     user_payload = {
-        "question": question or "基于真实推文拆解立项路径与运营",
+        "question": question or q_default,
+        "lang": L,
         "token": {
             "symbol": (token or {}).get("symbol"),
             "name": (token or {}).get("name"),
@@ -391,18 +466,14 @@ async def analyze_twitter_ops(
         "recent_tweets": tweets_compact,
         "tweet_count": bundle.get("tweet_count"),
         "fetch_notes": notes,
-        "rules": "只能依据 recent_tweets；禁止编造未出现的推文内容",
+        "rules": rules,
     }
 
-    prompt = (
-        "以下为 6551 真实抓取的推文数据。请严格依据 recent_tweets 还原立项路径；"
-        "没有写在推文里的内容不要编造：\n"
-        + json.dumps(user_payload, ensure_ascii=False, default=str)[:24000]
-    )
+    prompt = prompt_head + json.dumps(user_payload, ensure_ascii=False, default=str)[:24000]
     try:
         content, resolved = await chat_text(
             settings,
-            OPS_SYSTEM,
+            ops_system(L),
             prompt,
             provider=provider,
             model=model,
@@ -412,13 +483,20 @@ async def analyze_twitter_ops(
         )
     except Exception as llm_err:
         # Tweets were fetched successfully — never 500 the whole ops panel
-        # just because the model timed out / errored.
-        lines = [
-            f"## @{username} 推文已抓到（{len(tweets_compact)} 条），但模型分析失败",
-            f"原因：{llm_err}",
-            "",
-            "### 最近推文摘要",
-        ]
+        if L == "en":
+            lines = [
+                f"## @{username}: fetched {len(tweets_compact)} tweets, but model analysis failed",
+                f"Reason: {llm_err}",
+                "",
+                "### Recent tweets",
+            ]
+        else:
+            lines = [
+                f"## @{username} 推文已抓到（{len(tweets_compact)} 条），但模型分析失败",
+                f"原因：{llm_err}",
+                "",
+                "### 最近推文摘要",
+            ]
         for i, t in enumerate(tweets_compact[:12], 1):
             text = str((t or {}).get("text") or "")[:220]
             tm = str((t or {}).get("time") or "")
@@ -438,8 +516,15 @@ async def analyze_twitter_ops(
         }
 
     # soft prefix if we had to use fallback strategy
-    if notes and any("备用" in n or "降级" in n for n in notes):
-        content = f"（数据拉取备注：{notes[-1]}）\n\n" + content
+    if notes and any(
+        ("备用" in n or "降级" in n or "search" in n.lower() or "合并" in n) for n in notes
+    ):
+        prefix = (
+            f"(Fetch note: {notes[-1]})\n\n"
+            if L == "en"
+            else f"（数据拉取备注：{notes[-1]}）\n\n"
+        )
+        content = prefix + content
 
     return {
         "ok": True,
@@ -452,6 +537,7 @@ async def analyze_twitter_ops(
         "model": resolved.model,
         "source": "twitter_ops",
         "fetch_notes": notes,
+        "lang": L,
     }
 
 
@@ -465,17 +551,25 @@ async def freeform_chat(
     model: str | None = None,
     api_key: str | None = None,
     base_url: str | None = None,
+    lang: str | None = None,
 ) -> dict[str, Any]:
+    L = normalize_lang(lang)
     ctx = context or {}
     user = message
     if ctx:
-        user = (
-            f"【会话上下文，可参考】\n{json.dumps(ctx, ensure_ascii=False, default=str)[:6000]}\n\n"
-            f"【用户】\n{message}"
-        )
+        if L == "en":
+            user = (
+                f"[Session context]\n{json.dumps(ctx, ensure_ascii=False, default=str)[:6000]}\n\n"
+                f"[User]\n{message}"
+            )
+        else:
+            user = (
+                f"【会话上下文，可参考】\n{json.dumps(ctx, ensure_ascii=False, default=str)[:6000]}\n\n"
+                f"【用户】\n{message}"
+            )
     content, resolved = await chat_text(
         settings,
-        COPILOT_SYSTEM,
+        copilot_system(L),
         user,
         history=history,
         provider=provider,
@@ -505,14 +599,28 @@ async def generate_playbook(
     model: str | None = None,
     api_key: str | None = None,
     base_url: str | None = None,
+    lang: str | None = None,
 ) -> dict[str, Any]:
     """Synthesize a reusable ops playbook from left/middle panel materials."""
+    L = normalize_lang(lang)
     if not resolve_llm(
         settings, provider, model, api_key_override=api_key, base_url_override=base_url
     ):
         raise RuntimeError("No LLM provider configured")
 
     sym = (token or {}).get("symbol") or "TOKEN"
+    if L == "en":
+        goal = "Write the user's own ops plan: launch path + Twitter + website; learn structure, not skin"
+        user = (
+            f"Benchmark ${sym}. Output a full English ops playbook Markdown (user's version).\n"
+            f"Materials:\n"
+        )
+    else:
+        goal = "生成用户自己的运营思路：立项路径 + 推特 + 网站，学结构不抄皮"
+        user = (
+            f"对标 ${sym}。请输出完整「运营思路」Markdown（用户自己的版本）。\n"
+            f"材料：\n"
+        )
     payload = {
         "benchmark_token": token,
         "token_snapshot": analysis,
@@ -520,15 +628,13 @@ async def generate_playbook(
         "twitter_ops_excerpt": (twitter_ops or "")[:4500],
         "website_ops_excerpt": (website_ops or "")[:3500],
         "user_note": extra_note or "",
-        "goal": "生成用户自己的运营思路：立项路径 + 推特 + 网站，学结构不抄皮",
+        "goal": goal,
+        "lang": L,
     }
-    user = (
-        f"对标 ${sym}。请输出完整「运营思路」Markdown（用户自己的版本）。\n"
-        f"材料：\n{json.dumps(payload, ensure_ascii=False, default=str)[:16000]}"
-    )
+    user = user + json.dumps(payload, ensure_ascii=False, default=str)[:16000]
     content, resolved = await chat_text(
         settings,
-        PLAYBOOK_SYSTEM,
+        playbook_system(L),
         user,
         provider=provider,
         model=model,
@@ -542,4 +648,5 @@ async def generate_playbook(
         "model": resolved.model,
         "source": "playbook",
         "symbol": sym,
+        "lang": L,
     }

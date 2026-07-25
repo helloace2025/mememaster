@@ -17,6 +17,7 @@ from app.services.chat import (
     _twitter_fetch_failed_message,
 )
 from app.services.gmgn import GmgnClient, GmgnError, normalize_token
+from app.services.lang import disclaimer as lang_disclaimer, normalize_lang
 from app.services.llm import provider_status, resolve_llm
 from app.services.twitter import TwitterClient, TwitterError
 from app.services.website import analyze_website
@@ -45,6 +46,7 @@ class AnalyzeBody(BaseModel):
     address: str
     token: dict[str, Any] | None = None
     include_twitter: bool = True
+    lang: str | None = Field(default=None, description="zh | en — UI language for LLM output")
     provider: str | None = Field(
         default=None,
         description="可选覆盖 LLM 厂商: deepseek|openai|google|anthropic|...",
@@ -61,6 +63,7 @@ class AnalyzeBatchBody(BaseModel):
     tokens: list[dict[str, Any]] = Field(default_factory=list)
     include_twitter: bool = True
     max_tokens: int = 9
+    lang: str | None = None
     provider: str | None = None
     model: str | None = None
     api_key: str | None = None
@@ -71,6 +74,7 @@ class ChatBody(BaseModel):
     message: str
     history: list[dict[str, str]] = Field(default_factory=list)
     context: dict[str, Any] | None = None
+    lang: str | None = None
     provider: str | None = None
     model: str | None = None
     api_key: str | None = None
@@ -82,6 +86,7 @@ class TwitterOpsBody(BaseModel):
     token: dict[str, Any] | None = None
     question: str = "分析这个账号的推文，看它是怎么运营的"
     max_tweets: int = 25
+    lang: str | None = None
     provider: str | None = None
     model: str | None = None
     api_key: str | None = None
@@ -95,6 +100,7 @@ class PlaybookBody(BaseModel):
     website_ops: str | None = None
     scores: list[dict[str, Any]] | None = None
     note: str | None = None
+    lang: str | None = None
     provider: str | None = None
     model: str | None = None
     api_key: str | None = None
@@ -104,6 +110,7 @@ class PlaybookBody(BaseModel):
 class WebsiteOpsBody(BaseModel):
     url: str | None = None
     token: dict[str, Any] | None = None
+    lang: str | None = None
     provider: str | None = None
     model: str | None = None
     api_key: str | None = None
@@ -394,12 +401,13 @@ async def analyze_endpoint(body: AnalyzeBody) -> dict[str, Any]:
         model=body.model,
         api_key=body.api_key,
         base_url=body.base_url,
+        lang=body.lang,
     )
     return {
         "token": token,
         "twitter": profile,
         "analysis": analysis,
-        "disclaimer": "仅供研究与教育，非投资建议",
+        "disclaimer": lang_disclaimer(normalize_lang(body.lang)),
     }
 
 
@@ -461,10 +469,11 @@ async def chat_endpoint(body: ChatBody) -> dict[str, Any]:
             model=body.model,
             api_key=body.api_key,
             base_url=body.base_url,
+            lang=body.lang,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
-    return {**result, "disclaimer": "仅供研究与教育，非投资建议"}
+    return {**result, "disclaimer": lang_disclaimer(normalize_lang(body.lang))}
 
 
 @app.post("/api/twitter/ops")
@@ -472,6 +481,8 @@ async def twitter_ops_endpoint(body: TwitterOpsBody) -> dict[str, Any]:
     """Fetch tweets via 6551 OpenNews REST (same as opentwitter skill) + ops analysis."""
     from app.services.gmgn import clean_twitter_username
 
+    L = normalize_lang(body.lang)
+    disc = lang_disclaimer(L)
     username = (body.username or "").strip()
     # Prefer explicit username, then token fields (may be full x.com URL from GMGN)
     if not username and body.token:
@@ -491,28 +502,39 @@ async def twitter_ops_endpoint(body: TwitterOpsBody) -> dict[str, Any]:
     if username:
         cleaned, st = clean_twitter_username(username)
         if st in ("dead", "community", "missing") or not cleaned:
+            if L == "en":
+                msg = (
+                    f"Invalid X link or Community/deleted account (status={st}); cannot fetch tweets. "
+                    "Pick a token with a real @handle."
+                )
+            else:
+                msg = (
+                    f"X 链接无效或为 Community/已删除账号（status={st}），无法抓推文。"
+                    " 请换有真实 @handle 的代币。"
+                )
             return {
                 "ok": False,
                 "username": username,
-                "content": (
-                    f"X 链接无效或为 Community/已删除账号（status={st}），无法抓推文。"
-                    " 请换有真实 @handle 的代币。"
-                ),
+                "content": msg,
                 "source": "twitter_bad_handle",
                 "error_code": st or "bad_handle",
-                "disclaimer": "仅供研究与教育，非投资建议",
+                "disclaimer": disc,
             }
         username = cleaned
 
     if not username:
         raise HTTPException(
             status_code=400,
-            detail="需要 twitter username：请传 username，或 token.twitter_username",
+            detail=(
+                "twitter username required"
+                if L == "en"
+                else "需要 twitter username：请传 username，或 token.twitter_username"
+            ),
         )
     if not settings.opennews_token:
         raise HTTPException(
             status_code=400,
-            detail="OPENNEWS_TOKEN is not set（Railway 变量名需为 OPENNEWS_TOKEN）",
+            detail="OPENNEWS_TOKEN is not set",
         )
 
     try:
@@ -526,42 +548,45 @@ async def twitter_ops_endpoint(body: TwitterOpsBody) -> dict[str, Any]:
             api_key=body.api_key,
             base_url=body.base_url,
             max_tweets=min(50, max(5, body.max_tweets)),
+            lang=L,
         )
     except TwitterError as e:
-        # soft-fail for UI: still 200 with clean copy (no raw stack)
         return {
             "ok": False,
             "username": username,
             "content": _twitter_fetch_failed_message(
-                username, notes=[str(e)]
+                username, notes=[str(e)], lang=L
             ),
             "source": "twitter_error",
-            "disclaimer": "仅供研究与教育，非投资建议",
+            "disclaimer": disc,
         }
     except Exception as e:
-        # Never hard-500 the ops panel — UI expects soft copy
         return {
             "ok": False,
             "username": username,
             "content": _twitter_fetch_failed_message(
-                username, notes=[f"服务异常: {e}"]
+                username, notes=[str(e)], lang=L
             ),
             "source": "twitter_error",
             "error_code": "server_error",
-            "disclaimer": "仅供研究与教育，非投资建议",
+            "disclaimer": disc,
         }
 
-    return {**result, "disclaimer": "仅供研究与教育，非投资建议"}
+    return {**result, "disclaimer": disc}
 
 
 @app.post("/api/website/ops")
 async def website_ops_endpoint(body: WebsiteOpsBody) -> dict[str, Any]:
     """Fetch project website and analyze landing-page / ops design."""
+    L = normalize_lang(body.lang)
     url = (body.url or "").strip()
     if not url and body.token:
         url = str(body.token.get("website") or "").strip()
     if not url:
-        raise HTTPException(status_code=400, detail="需要 website url 或 token.website")
+        raise HTTPException(
+            status_code=400,
+            detail="website url required" if L == "en" else "需要 website url 或 token.website",
+        )
     try:
         result = await analyze_website(
             settings,
@@ -571,17 +596,22 @@ async def website_ops_endpoint(body: WebsiteOpsBody) -> dict[str, Any]:
             model=body.model,
             api_key=body.api_key,
             base_url=body.base_url,
+            lang=L,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
-    return {**result, "disclaimer": "仅供研究与教育，非投资建议"}
+    return {**result, "disclaimer": lang_disclaimer(L)}
 
 
 @app.post("/api/playbook")
 async def playbook_endpoint(body: PlaybookBody) -> dict[str, Any]:
     """Generate a reusable ops playbook from benchmark panels."""
+    L = normalize_lang(body.lang)
     if not body.token and not body.analysis:
-        raise HTTPException(status_code=400, detail="需要 token 或 analysis")
+        raise HTTPException(
+            status_code=400,
+            detail="token or analysis required" if L == "en" else "需要 token 或 analysis",
+        )
     if not resolve_llm(
         settings,
         body.provider,
@@ -603,7 +633,8 @@ async def playbook_endpoint(body: PlaybookBody) -> dict[str, Any]:
             model=body.model,
             api_key=body.api_key,
             base_url=body.base_url,
+            lang=L,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
-    return {**result, "disclaimer": "仅供研究与教育，非投资建议"}
+    return {**result, "disclaimer": lang_disclaimer(L)}

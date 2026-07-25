@@ -10,38 +10,46 @@ from urllib.parse import urljoin, urlparse
 import httpx
 
 from app.config import Settings
+from app.services.lang import Lang, normalize_lang, with_lang
 from app.services.llm import resolve_llm
 from app.services.chat import chat_text
 
-WEBSITE_SYSTEM = """你是 meme 项目「官网 / 落地页」运营拆解教练。
+WEBSITE_SYSTEM_ZH = """你是 meme 项目「官网 / 落地页」运营拆解教练。
 基于真实抓取的页面摘要（标题、meta、可见文案、链接、技术线索），分析这个站是怎么为项目服务的。
 
 用中文 Markdown 输出（不要 JSON），结构固定：
 
 ## 1. 站点定位
-一句话：这是官方站 / 单页落地 / 占位 / 链接聚合 / 无实质内容？
-
 ## 2. 信息架构与首屏
-- 打开 10 秒用户会知道什么？
-- 模块顺序（有什么、缺什么）
-
 ## 3. 设计与视觉
-- 风格（极简 / 赛博 / meme 丑萌 / 企业风…）
-- 主色、角色/符号是否清晰
-- 移动端友好度（从结构推断）
-
 ## 4. 功能与转化
-- 有哪些可点入口（买币、社群、推特、文档…）
-- 有没有 CA / 图表 / 仪表盘等实质功能
-
 ## 5. 技术栈线索
-根据 HTML/脚本/框架特征列出「较可能」的栈；不确定就写「证据不足」，禁止瞎编。
-
 ## 6. 可学点 / 勿抄点
-各 2–4 条，学结构不抄皮（商标/假官方禁止）。
 
 原则：信息不足就标明；研究教育，非投资建议。正常换行，不要字面 \\n。
 """
+
+WEBSITE_SYSTEM_EN = """You are a meme project coach for **website / landing page** teardown.
+Use the real page summary (title, meta, visible copy, links, tech hints).
+
+Write **English** Markdown (not JSON):
+
+## 1. Site role
+## 2. IA & first screen
+## 3. Design & visuals
+## 4. Features & conversion
+## 5. Tech stack clues
+## 6. What to learn / what not to copy
+
+Research only — not investment advice. Real newlines; no literal \\n.
+"""
+
+
+def website_system(lang: Lang) -> str:
+    return with_lang(WEBSITE_SYSTEM_EN if lang == "en" else WEBSITE_SYSTEM_ZH, lang)
+
+
+WEBSITE_SYSTEM = WEBSITE_SYSTEM_ZH
 
 
 _TECH_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
@@ -220,17 +228,28 @@ async def analyze_website(
     model: str | None = None,
     api_key: str | None = None,
     base_url: str | None = None,
+    lang: str | None = None,
 ) -> dict[str, Any]:
+    L = normalize_lang(lang)
     fetched = await fetch_website(url)
     if not fetched.get("ok"):
+        err = fetched.get("error") or ("unknown error" if L == "en" else "未知错误")
+        if L == "en":
+            content = (
+                f"Could not open the site: {err}\n\n"
+                f"URL: {url}\n"
+                "Possible causes: downtime, bot protection, client-only render, or bad link."
+            )
+        else:
+            content = (
+                f"无法打开网站：{err}\n\n"
+                f"URL：{url}\n"
+                "可能原因：站点宕机、防爬、仅客户端渲染、或链接无效。"
+            )
         return {
             "ok": False,
             "url": url,
-            "content": (
-                f"无法打开网站：{fetched.get('error') or '未知错误'}\n\n"
-                f"URL：{url}\n"
-                "可能原因：站点宕机、防爬、仅客户端渲染、或链接无效。"
-            ),
+            "content": content,
             "fetch": fetched,
             "source": "website_fetch_error",
         }
@@ -239,15 +258,27 @@ async def analyze_website(
         settings, provider, model, api_key_override=api_key, base_url_override=base_url
     ):
         # still return raw summary without LLM
-        tech = ", ".join(fetched.get("tech_hints") or []) or "未识别"
-        content = (
-            f"## 站点抓取摘要（未配置 LLM，仅原始观察）\n\n"
-            f"- URL：{fetched.get('final_url')}\n"
-            f"- 标题：{fetched.get('title') or '—'}\n"
-            f"- 描述：{fetched.get('description') or '—'}\n"
-            f"- 技术线索：{tech}\n"
-            f"- 可见文案摘录：\n\n{(fetched.get('visible_text_excerpt') or '')[:1200]}\n"
+        tech = ", ".join(fetched.get("tech_hints") or []) or (
+            "unknown" if L == "en" else "未识别"
         )
+        if L == "en":
+            content = (
+                f"## Site fetch summary (no LLM configured)\n\n"
+                f"- URL: {fetched.get('final_url')}\n"
+                f"- Title: {fetched.get('title') or '—'}\n"
+                f"- Description: {fetched.get('description') or '—'}\n"
+                f"- Tech hints: {tech}\n"
+                f"- Visible text excerpt:\n\n{(fetched.get('visible_text_excerpt') or '')[:1200]}\n"
+            )
+        else:
+            content = (
+                f"## 站点抓取摘要（未配置 LLM，仅原始观察）\n\n"
+                f"- URL：{fetched.get('final_url')}\n"
+                f"- 标题：{fetched.get('title') or '—'}\n"
+                f"- 描述：{fetched.get('description') or '—'}\n"
+                f"- 技术线索：{tech}\n"
+                f"- 可见文案摘录：\n\n{(fetched.get('visible_text_excerpt') or '')[:1200]}\n"
+            )
         return {
             "ok": True,
             "url": url,
@@ -257,6 +288,7 @@ async def analyze_website(
         }
 
     payload = {
+        "lang": L,
         "token": {
             "symbol": (token or {}).get("symbol"),
             "name": (token or {}).get("name"),
@@ -274,13 +306,19 @@ async def analyze_website(
             "visible_text_excerpt": (fetched.get("visible_text_excerpt") or "")[:3000],
         },
     }
-    prompt = (
-        "请基于以下真实抓取的官网数据做落地页运营拆解：\n"
-        + json.dumps(payload, ensure_ascii=False, default=str)[:18000]
-    )
+    if L == "en":
+        prompt = (
+            "Using this real website fetch, write a landing-page ops teardown in English:\n"
+            + json.dumps(payload, ensure_ascii=False, default=str)[:18000]
+        )
+    else:
+        prompt = (
+            "请基于以下真实抓取的官网数据做落地页运营拆解：\n"
+            + json.dumps(payload, ensure_ascii=False, default=str)[:18000]
+        )
     content, resolved = await chat_text(
         settings,
-        WEBSITE_SYSTEM,
+        website_system(L),
         prompt,
         provider=provider,
         model=model,

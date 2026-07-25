@@ -97,12 +97,13 @@ export function saveLlmPrefs(p: LlmPrefs) {
   }
 }
 
-/** Payload fragment for API calls */
-export function llmRequestFields(p: LlmPrefs) {
+/** Payload fragment for API calls (include UI lang so LLM replies match). */
+export function llmRequestFields(p: LlmPrefs, lang?: "zh" | "en" | string) {
   return {
     provider: p.provider || undefined,
     model: p.model || undefined,
     api_key: p.apiKey || undefined,
     base_url: p.baseUrl || undefined,
+    lang: lang === "en" ? "en" : "zh",
   };
 }
