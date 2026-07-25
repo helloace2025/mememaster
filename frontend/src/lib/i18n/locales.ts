@@ -25,6 +25,9 @@ export const zh: Dict = {
   "agent.running": "运行中",
   "agent.open": "展开日志",
   "agent.close": "收起",
+  "agent.logTitle": "Agent 任务日志",
+  "agent.waiting": "等待 agent 任务…",
+  "agent.streamHint": "热门榜 / 推特 / 网站 会在此滚动输出",
 
   // dashboard
   "board.title": "看板 · 全链新币热门",
@@ -226,6 +229,9 @@ export const en: Dict = {
   "agent.running": "running",
   "agent.open": "Open log",
   "agent.close": "Collapse",
+  "agent.logTitle": "Agent task log",
+  "agent.waiting": "waiting for agent tasks…",
+  "agent.streamHint": "hot list / twitter / website will stream here",
 
   "board.title": "Board · Multi-chain new-token trends",
   "board.subtitle": "Filter old coins · focus new narratives ({age})",

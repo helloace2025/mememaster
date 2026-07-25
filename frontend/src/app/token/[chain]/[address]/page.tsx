@@ -161,27 +161,51 @@ function WorkspaceInner() {
 
   const runNarrative = useCallback(
     async (t: Token) => {
+      const en = locale === "en";
       setLoadingN(true);
       setError(null);
-      agentLog("token", `读取 ${t.symbol} 基础元数据 (${t.chain})`, "run");
-      agentLog("llm", `摘要分析 ${t.symbol}…`, "run");
+      agentLog(
+        "token",
+        en
+          ? `Load ${t.symbol} metadata (${t.chain})`
+          : `读取 ${t.symbol} 基础元数据 (${t.chain})`,
+        "run"
+      );
+      agentLog(
+        "llm",
+        en ? `Summarizing ${t.symbol}…` : `摘要分析 ${t.symbol}…`,
+        "run"
+      );
       try {
         const res = await analyzeToken(t, llmRequestFields(llm, locale));
         setAnalysis(res.analysis);
         saveFocusToken(t);
+        const one = res.analysis?.one_liner?.slice(0, 48);
         agentLog(
           "llm",
-          res.analysis?.one_liner
-            ? `摘要完成 · ${res.analysis.one_liner.slice(0, 48)}`
-            : "摘要完成",
+          one
+            ? en
+              ? `Summary done · ${one}`
+              : `摘要完成 · ${one}`
+            : en
+              ? "Summary done"
+              : "摘要完成",
           "ok"
         );
-        tickAgentProgress(`摘要完成 · ${t.symbol}`);
+        tickAgentProgress(
+          en ? `Summary · ${t.symbol}` : `摘要完成 · ${t.symbol}`
+        );
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        agentLog("llm", `摘要失败: ${msg}`, "err");
+        agentLog(
+          "llm",
+          en ? `Summary failed: ${msg}` : `摘要失败: ${msg}`,
+          "err"
+        );
         setError(msg);
-        tickAgentProgress(`摘要失败 · ${t.symbol}`);
+        tickAgentProgress(
+          en ? `Summary failed · ${t.symbol}` : `摘要失败 · ${t.symbol}`
+        );
       } finally {
         setLoadingN(false);
       }
@@ -281,7 +305,11 @@ function WorkspaceInner() {
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        agentLog("twitter", `抓取/分析失败: ${msg}`, "err");
+        agentLog(
+          "twitter",
+          en ? `Fetch/analysis failed: ${msg}` : `抓取/分析失败: ${msg}`,
+          "err"
+        );
         setOpsText(
           en ? `Tweet analysis failed: ${msg}` : `推文分析失败：${msg}`
         );
@@ -304,7 +332,12 @@ function WorkspaceInner() {
         return;
       }
       setLoadingW(true);
-      agentLog("web", `打开官网 ${t.website.replace(/^https?:\/\//, "")}…`, "run");
+      const host = t.website.replace(/^https?:\/\//, "");
+      agentLog(
+        "web",
+        en ? `Open site ${host}…` : `打开官网 ${host}…`,
+        "run"
+      );
       try {
         const res = await websiteOps({
           token: t,
@@ -323,20 +356,36 @@ function WorkspaceInner() {
             .join(" · ")
         );
         if (res.ok === false) {
-          agentLog("web", en ? "Website fetch failed" : "网站抓取失败或无法解析", "err");
+          agentLog(
+            "web",
+            en ? "Website fetch failed" : "网站抓取失败或无法解析",
+            "err"
+          );
           tickAgentProgress(en ? "Website failed" : "网站失败");
         } else {
           agentLog(
             "web",
-            tech ? `落地页拆解完成 · ${tech}` : "落地页拆解完成",
+            tech
+              ? en
+                ? `Landing teardown done · ${tech}`
+                : `落地页拆解完成 · ${tech}`
+              : en
+                ? "Landing teardown done"
+                : "落地页拆解完成",
             "ok"
           );
           tickAgentProgress(en ? "Website done" : "网站完成");
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        agentLog("web", `网站分析失败: ${msg}`, "err");
-        setWebText(en ? `Website analysis failed: ${msg}` : `网站分析失败：${msg}`);
+        agentLog(
+          "web",
+          en ? `Website analysis failed: ${msg}` : `网站分析失败: ${msg}`,
+          "err"
+        );
+        setWebText(
+          en ? `Website analysis failed: ${msg}` : `网站分析失败：${msg}`
+        );
         tickAgentProgress(en ? "Website failed" : "网站失败");
       } finally {
         setLoadingW(false);
@@ -462,7 +511,13 @@ function WorkspaceInner() {
         ]);
       } else {
         const msg = e instanceof Error ? e.message : String(e);
-        agentLog("llm", `运营思路失败: ${msg}`, "err");
+        agentLog(
+          "llm",
+          locale === "en"
+            ? `Playbook failed: ${msg}`
+            : `运营思路失败: ${msg}`,
+          "err"
+        );
         endAgentSession(sid, "error");
         setMessages((m) => [
           ...m,
@@ -597,7 +652,11 @@ function WorkspaceInner() {
         ]);
       } else {
         const msg = e instanceof Error ? e.message : String(e);
-        agentLog("chat", `对话失败: ${msg}`, "err");
+        agentLog(
+          "chat",
+          locale === "en" ? `Chat failed: ${msg}` : `对话失败: ${msg}`,
+          "err"
+        );
         endAgentSession(
           sid,
           "error",

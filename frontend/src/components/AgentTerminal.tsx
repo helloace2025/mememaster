@@ -14,6 +14,7 @@ import {
   currentRunningSession,
 } from "@/lib/agentLog";
 import TypewriterText from "@/components/TypewriterText";
+import { useI18n } from "@/lib/i18n/I18nProvider";
 
 /** Okara-style line prefix */
 function linePrefix(level: AgentLogEntry["level"]) {
@@ -97,13 +98,14 @@ function useAgentTerminalState() {
 /** Chip in the top bar row — toggles the full-width drawer */
 export function AgentTerminalTrigger() {
   const { open, busy, statusText } = useAgentTerminalState();
+  const { t } = useI18n();
 
   return (
     <button
       type="button"
       onClick={() => setAgentTerminalOpen(!open)}
       className="group flex min-w-0 max-w-full items-center gap-2 rounded-md border border-zinc-600/90 bg-black/40 px-2.5 py-1 text-left font-mono transition hover:border-zinc-400 hover:bg-black/60"
-      title="Agent 任务日志"
+      title={t("agent.logTitle")}
     >
       <span
         className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${
