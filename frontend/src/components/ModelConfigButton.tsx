@@ -218,14 +218,14 @@ export default function ModelConfigButton({ value, onChange }: Props) {
         return {
           provider: "custom",
           model: saved?.model || (draft.provider === "custom" ? draft.model || "" : ""),
-          apiKey: ***,
+          apiKey: saved?.apiKey || "",
           baseUrl: saved?.baseUrl || row.baseUrlDefault || "",
         };
       }
       return {
         provider: row.providerId,
         model: row.modelId,
-        apiKey: ***,
+        apiKey: saved?.apiKey || "",
         baseUrl:
           saved?.baseUrl ||
           row.baseUrlDefault ||
