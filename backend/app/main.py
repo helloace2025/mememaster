@@ -840,3 +840,57 @@ async def playbook_endpoint(body: PlaybookBody) -> dict[str, Any]:
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
     return {**result, "disclaimer": lang_disclaimer(L)}
+
+
+@app.post("/api/agent")
+async def agent_endpoint(body: ChatBody) -> dict[str, Any]:
+    """A2MCP endpoint: fetch real data (GMGN + Twitter) then LLM analysis."""
+    L = normalize_lang(body.lang)
+    if not body.message.strip():
+        raise HTTPException(status_code=400, detail="message is empty")
+
+    # 1. 拿真实 GMGN 热点数据
+    from app.services.gmgn import GmgnClient, GmgnError
+
+    try:
+        gmgn = GmgnClient(settings)
+        hot_data = []
+        for chain in ["sol", "bsc", "base", "eth", "robinhood"]:
+            try:
+                rank = await gmgn.trending(
+                    chain=chain, interval="24h", limit=5, max_created="7d"
+                )
+                for t in rank[:3]:
+                    hot_data.append(
+                        {
+                            "chain": chain,
+                            "symbol": t.get("symbol", "?"),
+                            "name": t.get("name", "?"),
+                            "market_cap": t.get("market_cap", 0),
+                            "volume": t.get("volume", 0),
+                            "price_change": t.get("price_change_percent", 0),
+                        }
+                    )
+            except Exception:
+                pass
+    except GmgnError:
+        hot_data = []
+
+    # 2. 组装真实数据上下文后调 LLM 分析
+    ctx: dict[str, Any] = {"hot_board": hot_data} if hot_data else {}
+    result = await freeform_chat(
+        settings,
+        message=body.message.strip(),
+        history=body.history,
+        context=ctx,
+        provider="deepseek",
+        model=None,
+        api_key=None,
+        base_url=None,
+        lang=L,
+    )
+    return {
+        **result,
+        "data_sources": {"gmgn": bool(hot_data), "opennews": bool(settings.opennews_token)},
+        "disclaimer": lang_disclaimer(L),
+    }
