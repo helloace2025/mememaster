@@ -684,7 +684,7 @@ async def freeform_chat(
                 base_url=base_url,
                 temperature=0.55,
             ),
-            timeout=45.0,
+            timeout=120.0,
         )
     except asyncio.TimeoutError:
         msg = (
