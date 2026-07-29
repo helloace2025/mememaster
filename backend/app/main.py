@@ -866,9 +866,15 @@ async def agent_endpoint(body: ChatBody) -> dict[str, Any]:
                             "chain": chain,
                             "symbol": t.get("symbol", "?"),
                             "name": t.get("name", "?"),
+                            "address": t.get("address", ""),
                             "market_cap": t.get("market_cap", 0),
                             "volume": t.get("volume", 0),
                             "price_change": t.get("price_change_percent", 0),
+                            "price": t.get("price", 0),
+                            "liquidity": t.get("liquidity", 0),
+                            "holder_count": t.get("holder_count", 0),
+                            "swaps": t.get("swaps", 0),
+                            "url": f"https://gmgn.ai/{chain}/token/{t.get('address','')}" if t.get("address") else "",
                         }
                     )
             except Exception:
