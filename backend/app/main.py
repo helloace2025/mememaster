@@ -540,12 +540,18 @@ async def chat_endpoint(body: ChatBody) -> dict[str, Any]:
     """Open-ended co-pilot: recap left+middle panels into user's own ops plan."""
     if not body.message.strip():
         raise HTTPException(status_code=400, detail="message is empty")
+    # 固定使用 DeepSeek，前端传参仅作为可选覆盖
+    provider = body.provider or "deepseek"
+    model = body.model or None
+    api_key = body.api_key or None
+    base_url = body.base_url or None
+
     if not resolve_llm(
         settings,
-        body.provider,
-        body.model,
-        api_key_override=body.api_key,
-        base_url_override=body.base_url,
+        provider,
+        model,
+        api_key_override=api_key,
+        base_url_override=base_url,
     ):
         raise HTTPException(
             status_code=400,
@@ -559,10 +565,10 @@ async def chat_endpoint(body: ChatBody) -> dict[str, Any]:
             history=body.history,
             # Cap context — huge twitter/website dumps make LLM slow → proxy 500
             context=_trim_chat_context(body.context),
-            provider=body.provider if body.api_key else None,
-            model=body.model if body.api_key else None,
-            api_key=body.api_key or None,
-            base_url=body.base_url if body.api_key else None,
+            provider=provider,
+            model=model,
+            api_key=api_key,
+            base_url=base_url,
             lang=L,
         )
     except Exception:

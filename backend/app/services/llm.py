@@ -31,165 +31,12 @@ class ProviderSpec:
 # Recommended models per provider (UI catalog). First item is the economical default.
 # Catalog refreshed ~2026-07. Users can still type a custom model id not in this list.
 # Prefer current flagship IDs; mark sunset models as legacy only when still briefly usable.
-MODEL_CATALOG: dict[str, list[dict[str, str]]] = {
+MODEL_LISTS: dict[str, list[dict[str, str]]] = {
     "deepseek": [
         {"id": "deepseek-v4-flash", "label": "V4 Flash（推荐·经济）", "tier": "economy"},
         {"id": "deepseek-v4-pro", "label": "V4 Pro（旗舰）", "tier": "premium"},
-        # deepseek-chat / reasoner sunset 2026-07-24 → map to V4 Flash modes; keep as short aliases only
-        {"id": "deepseek-chat", "label": "deepseek-chat（将下线→V4 Flash）", "tier": "legacy"},
-        {"id": "deepseek-reasoner", "label": "deepseek-reasoner（将下线→V4 思考）", "tier": "legacy"},
-    ],
-    "openai": [
-        {"id": "gpt-5.6-luna", "label": "GPT-5.6 Luna（推荐·经济）", "tier": "economy"},
-        {"id": "gpt-5.6-terra", "label": "GPT-5.6 Terra（均衡）", "tier": "premium"},
-        {"id": "gpt-5.6-sol", "label": "GPT-5.6 Sol（旗舰推理）", "tier": "premium"},
-        {"id": "gpt-5.5", "label": "GPT-5.5", "tier": "premium"},
-        {"id": "gpt-5", "label": "GPT-5", "tier": "premium"},
-        {"id": "o4-mini", "label": "o4-mini（推理）", "tier": "premium"},
-        {"id": "gpt-4.1-mini", "label": "GPT-4.1 mini（过渡）", "tier": "legacy"},
-        {"id": "gpt-4o-mini", "label": "GPT-4o mini（旧）", "tier": "legacy"},
-    ],
-    "anthropic": [
-        {"id": "claude-haiku-4-5", "label": "Claude Haiku 4.5（推荐·经济）", "tier": "economy"},
-        {"id": "claude-sonnet-5", "label": "Claude Sonnet 5（推荐）", "tier": "premium"},
-        {"id": "claude-sonnet-4-6", "label": "Claude Sonnet 4.6", "tier": "premium"},
-        {"id": "claude-opus-5", "label": "Claude Opus 5", "tier": "premium"},
-        {"id": "claude-opus-4-8", "label": "Claude Opus 4.8", "tier": "premium"},
-        {"id": "claude-fable-5", "label": "Claude Fable 5（最强）", "tier": "premium"},
-        {"id": "claude-sonnet-4-5", "label": "Claude Sonnet 4.5（旧）", "tier": "legacy"},
-        {"id": "claude-opus-4-5", "label": "Claude Opus 4.5（旧）", "tier": "legacy"},
-    ],
-    "google": [
-        {"id": "gemini-3.6-flash", "label": "Gemini 3.6 Flash（推荐·经济）", "tier": "economy"},
-        {"id": "gemini-3.5-flash-lite", "label": "Gemini 3.5 Flash-Lite", "tier": "economy"},
-        {"id": "gemini-3.5-flash", "label": "Gemini 3.5 Flash", "tier": "premium"},
-        {"id": "gemini-3.1-flash-lite", "label": "Gemini 3.1 Flash-Lite", "tier": "economy"},
-        {"id": "gemini-3.1-pro-preview", "label": "Gemini 3.1 Pro（预览）", "tier": "premium"},
-        {"id": "gemini-2.5-flash", "label": "Gemini 2.5 Flash（旧）", "tier": "legacy"},
-        {"id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro（旧）", "tier": "legacy"},
-    ],
-    "xai": [
-        {"id": "grok-4.5", "label": "Grok 4.5（推荐·旗舰）", "tier": "premium"},
-        {"id": "grok-4", "label": "Grok 4", "tier": "premium"},
-        {"id": "grok-4-1-fast-non-reasoning", "label": "Grok 4.1 Fast（经济）", "tier": "economy"},
-        {"id": "grok-4-1-fast-reasoning", "label": "Grok 4.1 Fast Reasoning", "tier": "premium"},
-        {"id": "grok-3-mini", "label": "Grok 3 Mini（旧）", "tier": "legacy"},
-        {"id": "grok-3", "label": "Grok 3（旧）", "tier": "legacy"},
-    ],
-    "moonshot": [
-        {"id": "kimi-k2.6", "label": "Kimi K2.6（推荐）", "tier": "premium"},
-        {"id": "kimi-k3", "label": "Kimi K3（旗舰）", "tier": "premium"},
-        {"id": "kimi-k2.5", "label": "Kimi K2.5", "tier": "premium"},
-        {"id": "moonshot-v1-128k", "label": "moonshot-v1-128k（将下线）", "tier": "legacy"},
-        {"id": "moonshot-v1-32k", "label": "moonshot-v1-32k（将下线）", "tier": "legacy"},
-        {"id": "moonshot-v1-8k", "label": "moonshot-v1-8k（将下线）", "tier": "legacy"},
-    ],
-    "qwen": [
-        {"id": "qwen-plus-latest", "label": "qwen-plus-latest（推荐）", "tier": "economy"},
-        {"id": "qwen-turbo-latest", "label": "qwen-turbo-latest（经济）", "tier": "economy"},
-        {"id": "qwen-max-latest", "label": "qwen-max-latest", "tier": "premium"},
-        {"id": "qwen3-max", "label": "Qwen3-Max", "tier": "premium"},
-        {"id": "qwen3-235b-a22b", "label": "Qwen3-235B", "tier": "premium"},
-        {"id": "qwen-long", "label": "qwen-long", "tier": "premium"},
-        {"id": "qwen-plus", "label": "qwen-plus（旧别名）", "tier": "legacy"},
-    ],
-    "zhipu": [
-        {"id": "glm-4.5-air", "label": "GLM-4.5-Air（推荐·经济）", "tier": "economy"},
-        {"id": "glm-4.6", "label": "GLM-4.6（推荐）", "tier": "premium"},
-        {"id": "glm-4.7", "label": "GLM-4.7", "tier": "premium"},
-        {"id": "glm-5.1", "label": "GLM-5.1（旗舰）", "tier": "premium"},
-        {"id": "glm-4.5", "label": "GLM-4.5", "tier": "premium"},
-        {"id": "glm-4-flash", "label": "GLM-4-Flash（旧）", "tier": "legacy"},
-    ],
-    "siliconflow": [
-        {"id": "deepseek-ai/DeepSeek-V4-Flash", "label": "DeepSeek-V4-Flash（推荐）", "tier": "economy"},
-        {"id": "deepseek-ai/DeepSeek-V4-Pro", "label": "DeepSeek-V4-Pro", "tier": "premium"},
-        {"id": "deepseek-ai/DeepSeek-V3", "label": "DeepSeek-V3", "tier": "economy"},
-        {"id": "deepseek-ai/DeepSeek-R1", "label": "DeepSeek-R1", "tier": "premium"},
-        {"id": "Qwen/Qwen3-235B-A22B", "label": "Qwen3-235B", "tier": "premium"},
-        {"id": "moonshotai/Kimi-K2.6", "label": "Kimi-K2.6", "tier": "premium"},
-        {"id": "THUDM/GLM-4.6", "label": "GLM-4.6", "tier": "premium"},
-    ],
-    "doubao": [
-        {"id": "doubao-seed-1-6-250615", "label": "doubao-seed-1.6（示例 id·请改方舟接入点）", "tier": "premium"},
-        {"id": "doubao-1-5-pro-32k-250115", "label": "doubao-1.5-pro-32k（示例）", "tier": "premium"},
-        {"id": "doubao-1-5-lite-32k-250115", "label": "doubao-1.5-lite-32k（示例·经济）", "tier": "economy"},
-        {"id": "doubao-pro-32k", "label": "doubao-pro-32k（旧别名/endpoint）", "tier": "legacy"},
-    ],
-    "minimax": [
-        {"id": "MiniMax-Text-01", "label": "MiniMax-Text-01（推荐）", "tier": "premium"},
-        {"id": "MiniMax-M1", "label": "MiniMax-M1", "tier": "premium"},
-        {"id": "abab6.5s-chat", "label": "abab6.5s-chat（旧）", "tier": "legacy"},
-        {"id": "abab6.5-chat", "label": "abab6.5-chat（旧）", "tier": "legacy"},
-    ],
-    "baichuan": [
-        {"id": "Baichuan4-Turbo", "label": "Baichuan4-Turbo（推荐）", "tier": "economy"},
-        {"id": "Baichuan4", "label": "Baichuan4", "tier": "premium"},
-        {"id": "Baichuan-M2", "label": "Baichuan-M2", "tier": "premium"},
-    ],
-    "yi": [
-        {"id": "yi-lightning", "label": "yi-lightning（经济）", "tier": "economy"},
-        {"id": "yi-large-turbo", "label": "yi-large-turbo", "tier": "premium"},
-        {"id": "yi-large", "label": "yi-large", "tier": "premium"},
-    ],
-    "mistral": [
-        {"id": "mistral-small-latest", "label": "Mistral Small（经济）", "tier": "economy"},
-        {"id": "mistral-medium-latest", "label": "Mistral Medium", "tier": "premium"},
-        {"id": "mistral-large-latest", "label": "Mistral Large", "tier": "premium"},
-        {"id": "codestral-latest", "label": "Codestral", "tier": "premium"},
-        {"id": "ministral-8b-latest", "label": "Ministral 8B", "tier": "economy"},
-        {"id": "open-mistral-nemo", "label": "Mistral Nemo", "tier": "economy"},
-    ],
-    "groq": [
-        {"id": "llama-3.3-70b-versatile", "label": "Llama 3.3 70B（推荐）", "tier": "economy"},
-        {"id": "llama-3.1-8b-instant", "label": "Llama 3.1 8B Instant", "tier": "economy"},
-        {"id": "openai/gpt-oss-120b", "label": "GPT-OSS 120B", "tier": "premium"},
-        {"id": "qwen/qwen3-32b", "label": "Qwen3 32B", "tier": "premium"},
-        {"id": "gemma2-9b-it", "label": "Gemma2 9B", "tier": "economy"},
-    ],
-    "together": [
-        {"id": "meta-llama/Llama-3.3-70B-Instruct-Turbo", "label": "Llama 3.3 70B Turbo", "tier": "economy"},
-        {"id": "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo", "label": "Llama 3.1 8B Turbo", "tier": "economy"},
-        {"id": "deepseek-ai/DeepSeek-V3", "label": "DeepSeek-V3", "tier": "premium"},
-        {"id": "Qwen/Qwen3-235B-A22B-Instruct-Turbo", "label": "Qwen3-235B Turbo", "tier": "premium"},
-        {"id": "moonshotai/Kimi-K2.6-Instruct", "label": "Kimi-K2.6", "tier": "premium"},
-    ],
-    "fireworks": [
-        {"id": "accounts/fireworks/models/llama-v3p3-70b-instruct", "label": "Llama 3.3 70B", "tier": "economy"},
-        {"id": "accounts/fireworks/models/deepseek-v3", "label": "DeepSeek V3", "tier": "premium"},
-        {"id": "accounts/fireworks/models/qwen3-235b-a22b", "label": "Qwen3 235B", "tier": "premium"},
-        {"id": "accounts/fireworks/models/kimi-k2p5-instruct", "label": "Kimi K2.5", "tier": "premium"},
-    ],
-    "perplexity": [
-        {"id": "sonar", "label": "Sonar（推荐·经济）", "tier": "economy"},
-        {"id": "sonar-pro", "label": "Sonar Pro", "tier": "premium"},
-        {"id": "sonar-reasoning-pro", "label": "Sonar Reasoning Pro", "tier": "premium"},
-        {"id": "sonar-deep-research", "label": "Sonar Deep Research", "tier": "premium"},
-    ],
-    "openrouter": [
-        {"id": "deepseek/deepseek-v4-flash", "label": "DeepSeek V4 Flash（经济）", "tier": "economy"},
-        {"id": "deepseek/deepseek-v4-pro", "label": "DeepSeek V4 Pro", "tier": "premium"},
-        {"id": "openai/gpt-5.6-luna", "label": "GPT-5.6 Luna", "tier": "economy"},
-        {"id": "openai/gpt-5.6-sol", "label": "GPT-5.6 Sol", "tier": "premium"},
-        {"id": "anthropic/claude-sonnet-5", "label": "Claude Sonnet 5", "tier": "premium"},
-        {"id": "google/gemini-3.6-flash", "label": "Gemini 3.6 Flash", "tier": "economy"},
-        {"id": "x-ai/grok-4.5", "label": "Grok 4.5", "tier": "premium"},
-        {"id": "moonshotai/kimi-k2.6", "label": "Kimi K2.6", "tier": "premium"},
-    ],
-    "ollama": [
-        {"id": "llama3.2", "label": "llama3.2（本地）", "tier": "local"},
-        {"id": "qwen3", "label": "qwen3", "tier": "local"},
-        {"id": "qwen2.5", "label": "qwen2.5", "tier": "local"},
-        {"id": "deepseek-r1", "label": "deepseek-r1", "tier": "local"},
-        {"id": "gemma3", "label": "gemma3", "tier": "local"},
-        {"id": "mistral", "label": "mistral", "tier": "local"},
-    ],
-    "custom": [
-        {"id": "custom-model", "label": "自定义 model id（下一步填写）", "tier": "custom"},
     ],
 }
-
-
 # Registry of supported providers. Keys are env-driven; only filled ones are "ready".
 PROVIDER_SPECS: dict[str, ProviderSpec] = {
     "openai": ProviderSpec(
@@ -405,7 +252,7 @@ def provider_status(settings: Settings) -> list[dict[str, Any]]:
             base = _get_attr(settings, "custom_llm_base_url") or base
         if pid == "ollama" and not base:
             base = "http://127.0.0.1:11434/v1"
-        catalog = list(MODEL_CATALOG.get(pid, []))
+        catalog = list(MODEL_LISTS.get(pid, []))
         if default_model and not any(m["id"] == default_model for m in catalog):
             catalog = [
                 {"id": default_model, "label": f"{default_model}（默认）", "tier": "default"},
