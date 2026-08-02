@@ -136,6 +136,24 @@ class Settings(BaseSettings):
     # Public bind port (Railway injects PORT)
     port: int = 8000
 
+    # ---------- OKX x402 (A2MCP paid endpoint) ----------
+    # Keep these only in Railway/local environment variables, never in source.
+    pay_to_address: str = ""
+    okx_api_key: str = ""
+    okx_secret_key: str = ""
+    okx_passphrase: str = ""
+    okx_base_url: str = "https://web3.okx.com"
+    x402_price_usd: str = "0.1"
+
+    @property
+    def x402_enabled(self) -> bool:
+        return bool(
+            self.pay_to_address
+            and self.okx_api_key
+            and self.okx_secret_key
+            and self.okx_passphrase
+        )
+
     @property
     def chains(self) -> list[str]:
         return [c.strip() for c in self.hot_chains.split(",") if c.strip()]

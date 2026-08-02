@@ -93,6 +93,64 @@ app.add_middleware(
 )
 
 
+def _enable_x402_agent_payment() -> None:
+    """Protect the marketplace endpoint with the official OKX x402 middleware.
+
+    The public website uses its other API routes.  Only the registered A2MCP
+    endpoint is charged, so an unpaid marketplace request deterministically
+    receives a valid 402 challenge and a paid replay reaches ``agent_endpoint``.
+    """
+    if not settings.x402_enabled:
+        return
+
+    from x402.http import (
+        OKXAuthConfig,
+        OKXFacilitatorClient,
+        OKXFacilitatorConfig,
+        PaymentOption,
+    )
+    from x402.http.middleware.fastapi import PaymentMiddlewareASGI
+    from x402.http.types import RouteConfig
+    from x402.mechanisms.evm.exact.server import ExactEvmScheme
+    from x402.server import x402ResourceServer
+
+    facilitator = OKXFacilitatorClient(
+        OKXFacilitatorConfig(
+            auth=OKXAuthConfig(
+                api_key=settings.okx_api_key,
+                secret_key=settings.okx_secret_key,
+                passphrase=settings.okx_passphrase,
+            ),
+            base_url=settings.okx_base_url,
+            sync_settle=True,
+        )
+    )
+    resource_server = x402ResourceServer(facilitator)
+    resource_server.register("eip155:196", ExactEvmScheme())
+    app.add_middleware(
+        PaymentMiddlewareASGI,
+        routes={
+            "POST /api/agent": RouteConfig(
+                accepts=[
+                    PaymentOption(
+                        scheme="exact",
+                        price=f"${settings.x402_price_usd}",
+                        network="eip155:196",
+                        pay_to=settings.pay_to_address,
+                        max_timeout_seconds=300,
+                    )
+                ],
+                description="MemeMaster real-time meme coin research and operations analysis",
+                mime_type="application/json",
+            )
+        },
+        server=resource_server,
+    )
+
+
+_enable_x402_agent_payment()
+
+
 class AnalyzeBody(BaseModel):
     chain: str
     address: str
