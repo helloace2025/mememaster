@@ -35,6 +35,17 @@ async def _successful_llm(*_args, **_kwargs):
     return {"ok": True, "content": "analysis"}
 
 
+def test_agent_endpoint_supports_get_probe() -> None:
+    """Marketplace reachability probes must not receive a 405 from the A2MCP URL."""
+    response = TestClient(main.app).get("/api/agent")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["method"] == "POST"
+    assert TestClient(main.app).options("/api/agent").status_code == 200
+
+
 def test_agent_returns_json_fallback_when_upstreams_timeout(monkeypatch) -> None:
     """A paid A2MCP replay must receive JSON, not an unhandled 500/timeout."""
     import app.services.gmgn as gmgn
