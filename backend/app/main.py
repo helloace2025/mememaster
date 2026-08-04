@@ -127,22 +127,27 @@ def _enable_x402_agent_payment() -> None:
     )
     resource_server = x402ResourceServer(facilitator)
     resource_server.register("eip155:196", ExactEvmScheme())
+    def agent_payment_route() -> RouteConfig:
+        return RouteConfig(
+            accepts=[
+                PaymentOption(
+                    scheme="exact",
+                    price=f"${settings.x402_price_usd}",
+                    network="eip155:196",
+                    pay_to=settings.pay_to_address,
+                    max_timeout_seconds=300,
+                )
+            ],
+            description="MemeMaster real-time meme coin research and operations analysis",
+            mime_type="application/json",
+        )
+
     app.add_middleware(
         PaymentMiddlewareASGI,
         routes={
-            "POST /api/agent": RouteConfig(
-                accepts=[
-                    PaymentOption(
-                        scheme="exact",
-                        price=f"${settings.x402_price_usd}",
-                        network="eip155:196",
-                        pay_to=settings.pay_to_address,
-                        max_timeout_seconds=300,
-                    )
-                ],
-                description="MemeMaster real-time meme coin research and operations analysis",
-                mime_type="application/json",
-            )
+            "GET /api/agent": agent_payment_route(),
+            "OPTIONS /api/agent": agent_payment_route(),
+            "POST /api/agent": agent_payment_route(),
         },
         server=resource_server,
     )
