@@ -35,14 +35,23 @@ async def _successful_llm(*_args, **_kwargs):
     return {"ok": True, "content": "analysis"}
 
 
-def test_agent_endpoint_supports_get_probe() -> None:
-    """Marketplace reachability probes must not receive a 405 from the A2MCP URL."""
-    response = TestClient(main.app).get("/api/agent")
+def test_agent_get_replay_executes_research(monkeypatch) -> None:
+    """A paid GET replay with a body must execute research, not return probe metadata."""
+    import app.services.gmgn as gmgn
+
+    monkeypatch.setattr(gmgn, "GmgnClient", _SlowGmgn)
+    monkeypatch.setattr(main, "freeform_chat", _successful_llm)
+
+    response = TestClient(main.app).request(
+        "GET",
+        "/api/agent",
+        json={"message": "Analyze current meme coin narratives", "lang": "en"},
+    )
 
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is True
-    assert body["method"] == "POST"
+    assert body["content"] == "analysis"
     assert TestClient(main.app).options("/api/agent").status_code == 200
 
 

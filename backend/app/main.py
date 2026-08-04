@@ -905,18 +905,13 @@ async def playbook_endpoint(body: PlaybookBody) -> dict[str, Any]:
     return {**result, "disclaimer": lang_disclaimer(L)}
 
 
-@app.api_route("/api/agent", methods=["GET", "OPTIONS"])
-async def agent_probe() -> dict[str, Any]:
-    """Allow marketplace reachability probes without exposing the paid action."""
-    return {
-        "ok": True,
-        "service": "MemeMaster A2MCP",
-        "method": "POST",
-        "payment": "x402",
-        "message": "Send a POST request with a valid x402 payment to receive research.",
-    }
+@app.options("/api/agent")
+async def agent_options_probe() -> dict[str, Any]:
+    """Expose a non-business OPTIONS target when x402 is disabled locally."""
+    return {"ok": True, "method": "POST"}
 
 
+@app.get("/api/agent")
 @app.post("/api/agent")
 async def agent_endpoint(body: ChatBody) -> dict[str, Any]:
     """A2MCP endpoint: fetch real data (GMGN + Twitter) then LLM analysis."""
