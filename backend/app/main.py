@@ -912,47 +912,81 @@ async def agent_endpoint(body: ChatBody) -> dict[str, Any]:
 
     try:
         gmgn = GmgnClient(settings)
-        hot_data = []
-        for chain in ["sol", "bsc", "base", "eth", "robinhood"]:
+
+        async def fetch_chain(chain: str) -> list[dict[str, Any]]:
             try:
-                rank = await gmgn.trending(
-                    chain=chain, interval="24h", limit=5, max_created="7d"
+                rank = await asyncio.wait_for(
+                    gmgn.trending(
+                        chain=chain, interval="24h", limit=5, max_created="7d"
+                    ),
+                    timeout=settings.agent_market_data_timeout_seconds,
                 )
-                for t in rank[:3]:
-                    hot_data.append(
-                        {
-                            "chain": chain,
-                            "symbol": t.get("symbol", "?"),
-                            "name": t.get("name", "?"),
-                            "address": t.get("address", ""),
-                            "market_cap": t.get("market_cap", 0),
-                            "volume": t.get("volume", 0),
-                            "price_change": t.get("price_change_percent", 0),
-                            "price": t.get("price", 0),
-                            "liquidity": t.get("liquidity", 0),
-                            "holder_count": t.get("holder_count", 0),
-                            "swaps": t.get("swaps", 0),
-                            "url": f"https://gmgn.ai/{chain}/token/{t.get('address','')}" if t.get("address") else "",
-                        }
-                    )
+                return [
+                    {
+                        "chain": chain,
+                        "symbol": t.get("symbol", "?"),
+                        "name": t.get("name", "?"),
+                        "address": t.get("address", ""),
+                        "market_cap": t.get("market_cap", 0),
+                        "volume": t.get("volume", 0),
+                        "price_change": t.get("price_change_percent", 0),
+                        "price": t.get("price", 0),
+                        "liquidity": t.get("liquidity", 0),
+                        "holder_count": t.get("holder_count", 0),
+                        "swaps": t.get("swaps", 0),
+                        "url": (
+                            f"https://gmgn.ai/{chain}/token/{t.get('address', '')}"
+                            if t.get("address")
+                            else ""
+                        ),
+                    }
+                    for t in rank[:3]
+                ]
             except Exception:
-                pass
+                return []
+
+        hot_data = [
+            token
+            for items in await asyncio.gather(
+                *[fetch_chain(chain) for chain in ["sol", "bsc", "base", "eth", "robinhood"]]
+            )
+            for token in items
+        ]
     except GmgnError:
         hot_data = []
 
     # 2. 组装真实数据上下文后调 LLM 分析
     ctx: dict[str, Any] = {"hot_board": hot_data} if hot_data else {}
-    result = await freeform_chat(
-        settings,
-        message=body.message.strip(),
-        history=body.history,
-        context=ctx,
-        provider="deepseek",
-        model=None,
-        api_key=None,
-        base_url=None,
-        lang=L,
-    )
+    try:
+        result = await asyncio.wait_for(
+            freeform_chat(
+                settings,
+                message=body.message.strip(),
+                history=body.history,
+                context=ctx,
+                provider="deepseek",
+                model=None,
+                api_key=None,
+                base_url=None,
+                lang=L,
+            ),
+            timeout=settings.agent_response_timeout_seconds,
+        )
+    except Exception:
+        return {
+            "ok": False,
+            "content": (
+                "Live market research is temporarily unavailable. Please retry shortly."
+                if L == "en"
+                else "实时市场研究暂时不可用，请稍后重试。"
+            ),
+            "source": "agent_fallback",
+            "data_sources": {
+                "gmgn": bool(hot_data),
+                "opennews": bool(settings.opennews_token),
+            },
+            "disclaimer": lang_disclaimer(L),
+        }
     return {
         **result,
         "data_sources": {"gmgn": bool(hot_data), "opennews": bool(settings.opennews_token)},
