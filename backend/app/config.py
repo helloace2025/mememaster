@@ -1,3 +1,4 @@
+from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 from pathlib import Path
 
@@ -144,18 +145,29 @@ class Settings(BaseSettings):
     okx_passphrase: str = ""
     okx_base_url: str = "https://web3.okx.com"
     x402_price_usd: str = "0.1"
+    # Keep the endpoint free by default. Enable only with an explicit Railway
+    # environment variable when paid x402 access is intended.
+    x402_payment_required: bool = False
     # Keep a paid marketplace call bounded so callers always receive a JSON result.
     agent_response_timeout_seconds: float = 45.0
     agent_market_data_timeout_seconds: float = 12.0
 
     @property
     def x402_enabled(self) -> bool:
-        return bool(
+        if not self.x402_payment_required:
+            return False
+        if not (
             self.pay_to_address
             and self.okx_api_key
             and self.okx_secret_key
             and self.okx_passphrase
-        )
+        ):
+            return False
+        try:
+            price = Decimal(self.x402_price_usd)
+            return price.is_finite() and price > 0
+        except InvalidOperation:
+            return False
 
     @property
     def chains(self) -> list[str]:

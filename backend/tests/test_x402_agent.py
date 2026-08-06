@@ -8,8 +8,17 @@ import pytest
 
 # The SDK validates its seller credentials with OKX before issuing a challenge.
 # Supply these only in a private CI/Railway smoke-test environment, never in git.
-_REQUIRED = ("PAY_TO_ADDRESS", "OKX_API_KEY", "OKX_SECRET_KEY", "OKX_PASSPHRASE")
-if not all(os.getenv(key) for key in _REQUIRED):
+_REQUIRED = (
+    "PAY_TO_ADDRESS",
+    "OKX_API_KEY",
+    "OKX_SECRET_KEY",
+    "OKX_PASSPHRASE",
+    "X402_PAYMENT_REQUIRED",
+)
+if not (
+    all(os.getenv(key) for key in _REQUIRED)
+    and os.getenv("X402_PAYMENT_REQUIRED", "").lower() in {"1", "true", "yes", "on"}
+):
     pytestmark = pytest.mark.skip(
         reason="requires private OKX x402 seller credentials"
     )
