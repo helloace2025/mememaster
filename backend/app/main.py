@@ -45,6 +45,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
         )
     # Soft-fail Twitter / website / analyze so the panel never shows "Internal Server Error"
     soft_paths = (
+        "/api/agent",
         "/api/twitter/",
         "/api/website/",
         "/api/analyze",

@@ -106,6 +106,22 @@ def test_agent_handles_market_client_initialization_failure(monkeypatch) -> None
     assert response.json()["data_sources"]["gmgn"] is False
 
 
+def test_agent_unhandled_errors_return_structured_json(monkeypatch) -> None:
+    def _broken_normalize_lang(_lang):
+        raise RuntimeError("unexpected handler error")
+
+    monkeypatch.setattr(main, "normalize_lang", _broken_normalize_lang)
+
+    response = TestClient(main.app, raise_server_exceptions=False).post(
+        "/api/agent",
+        json={"message": "Analyze current meme coin narratives", "lang": "en"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is False
+    assert response.json()["source"] == "server_soft_error"
+
+
 def test_agent_fetches_market_data_concurrently(monkeypatch) -> None:
     """Five chain lookups must not multiply marketplace response latency."""
     import app.services.gmgn as gmgn
