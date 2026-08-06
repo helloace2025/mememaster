@@ -927,7 +927,7 @@ async def agent_endpoint(body: ChatBody) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="message is empty")
 
     # 1. 拿真实 GMGN 热点数据
-    from app.services.gmgn import GmgnClient, GmgnError
+    from app.services.gmgn import GmgnClient
 
     try:
         gmgn = GmgnClient(settings)
@@ -971,7 +971,7 @@ async def agent_endpoint(body: ChatBody) -> dict[str, Any]:
             )
             for token in items
         ]
-    except GmgnError:
+    except Exception:
         hot_data = []
 
     # 2. 组装真实数据上下文后调 LLM 分析

@@ -18,6 +18,11 @@ class _UnavailableGmgn:
         raise TimeoutError("upstream timed out")
 
 
+class _BrokenGmgn:
+    def __init__(self, _settings):
+        raise RuntimeError("market client initialization failed")
+
+
 async def _unavailable_llm(*_args, **_kwargs):
     raise TimeoutError("LLM timed out")
 
@@ -83,6 +88,22 @@ def test_agent_returns_json_fallback_when_upstreams_timeout(monkeypatch) -> None
     assert body["ok"] is False
     assert body["source"] == "agent_fallback"
     assert body["content"]
+
+
+def test_agent_handles_market_client_initialization_failure(monkeypatch) -> None:
+    import app.services.gmgn as gmgn
+
+    monkeypatch.setattr(gmgn, "GmgnClient", _BrokenGmgn)
+    monkeypatch.setattr(main, "freeform_chat", _successful_llm)
+
+    response = TestClient(main.app, raise_server_exceptions=False).post(
+        "/api/agent",
+        json={"message": "Analyze current meme coin narratives", "lang": "en"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["content"] == "analysis"
+    assert response.json()["data_sources"]["gmgn"] is False
 
 
 def test_agent_fetches_market_data_concurrently(monkeypatch) -> None:
