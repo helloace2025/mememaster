@@ -4,7 +4,7 @@ import asyncio
 import re
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -912,6 +912,13 @@ async def agent_options_probe() -> dict[str, Any]:
 
 
 @app.get("/api/agent")
+async def agent_get_endpoint(body: ChatBody | None = Body(default=None)) -> dict[str, Any]:
+    """Handle endpoint probes and GET replays for the free A2MCP service."""
+    if body is None:
+        return {"ok": True, "method": "POST", "payment": "free"}
+    return await agent_endpoint(body)
+
+
 @app.post("/api/agent")
 async def agent_endpoint(body: ChatBody) -> dict[str, Any]:
     """A2MCP endpoint: fetch real data (GMGN + Twitter) then LLM analysis."""

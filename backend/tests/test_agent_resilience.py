@@ -51,8 +51,19 @@ def test_agent_get_replay_executes_research(monkeypatch) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is True
-    assert body["content"] == "analysis"
+    assert response.json()["content"] == "analysis"
     assert TestClient(main.app).options("/api/agent").status_code == 200
+
+
+def test_agent_get_probe_returns_free_service_metadata() -> None:
+    response = TestClient(main.app).get("/api/agent")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "ok": True,
+        "method": "POST",
+        "payment": "free",
+    }
 
 
 def test_agent_returns_json_fallback_when_upstreams_timeout(monkeypatch) -> None:
